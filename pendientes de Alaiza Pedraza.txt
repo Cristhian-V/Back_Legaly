@@ -1,0 +1,3 @@
+lista de entidades de l estado
+lista de tipo de documentos
+platilla de documentos con formato especifico
