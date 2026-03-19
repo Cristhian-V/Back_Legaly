@@ -1,128 +1,44 @@
 para adjuntar documentos que se arrastren a la pestaña de documentos y se suban al sistema de esa forma.
-
-
-
 Cambiar la seccion de Dashboard a Home.
-
-
-
 Plazos por vencer, 
-
-enlos casos activos hay plazos por vencer, plazos de presentación de documentos donde se subsanan las observaciones y se da un tiempo en días, estos días tienen que seleccionar si son dias habiles o dias calendario
-
-
-
+en los casos activos hay plazos por vencer, plazos de presentación de documentos donde se subsanan las observaciones y se da un tiempo en días, estos días tienen que seleccionar si son dias habiles o dias calendario
 documentos nuevos de un dia atras.
-
-
-
 quitar actividad de casos, y distribucion de areas, y acloparlos en una seccion re reportes
-
-
-
 en la pantalla de Home, ver el calendario de actividades del mes en curso tomando en cuenta que el dia presente )una semana anterior y dos semanas posteriores
-
-
-
 actividades recientes cambiar a actividades prontas  a cumplirce
 
-
-
-
-
 FLUJO DE CASOS
-
 1.pasante 
-
 2.asistente legal
-
 3.abogado
-
 4.abogado asociado
-
 5.abogado socio
 
-
-
-
-
 crean casos usuario 1,2  y modificar casos 
-
 revision por parte del abogado responsable usuario 3 y 4 revisar y modifica casos.
-
-
-
-
-
 el usuario 5 tiene acceso a todo el proceso como tal modificacion de casos.
 
-
-
-
-
 DETALLE DE CASOS
-
 quitar vencimiento
-
 añadir cliente contacto en datelles de casos.
-
 añadir entidad del estado.
-
 pantalla de creacion de entidades de l estado para que se creen nuevas entidades.
-
 juntar la pestaña de equipo legal en informacion genral.
-
 añadir abogados que estan inmersos en el caso.
 
-
-
 DOCUMENTOS
-
 como primer documento de todos los casos se debe tener la caratula donde esten los datos que estan en la informacion general.
-
-
-
 cambiar el titulo de historial y actividades a Calendario del caso.
-
 creacion actividades desde esta pestaña.
-
-
-
 los Usuarios 4 y 5 tendran una pestaña mas, que solo sera visible para ellos, que sea COBROS.
-
-
-
 en cobros Tambien que presente a los usuarios 1 y 2, pero solo que puedan registrar y ver los cobros que registron.
-
-
-
 **ver la posibilidad de que los documentos se generen desde el sistema con una ventana para modificar.**
-
-
-
 **REGISTRO DE CLIENTES** 
-
 **Todos los usuarios pueden crear.**
-
-
-
 los datos del cliente Nombre, NIT, Direccion Escrita
-
 Dentro de los perfiles del cliente que se pueda añadir a los contactos de cada cliente pueden ser varios.
-
 Nombre, cargo, correo electronico, telefono.
-
-
-
 quitar la seccion de documentos ya esta en la seccion de CASOS
 
-
-
 CALENDARIO
-
 que se muestren todas las actividades del mes actual y el siguiente.
-
-&#x20;
-
-
-
