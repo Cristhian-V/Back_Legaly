@@ -5,6 +5,9 @@ const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
+const authRoutes = require('./authRoutes');
+const inicioRoutes = require('./inicio');
+const casosRoutes = require('./casosRoutes');
 
 const app = express();
 
@@ -38,8 +41,11 @@ app.use(cookieParser()); // Permite leer las cookies de seguridad
 
 // --- RUTAS ---
 // Aplicamos el limitador de intentos solo a las rutas de autenticación
-const authRoutes = require('./authRoutes');
 app.use('/api/auth', loginLimiter, authRoutes);
+
+app.use('/api/inicio', inicioRoutes);
+
+app.use('/api/casos', casosRoutes);
 
 // --- INICIAR SERVIDOR ---
 const PORT = process.env.PORT || 3000;
