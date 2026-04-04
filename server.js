@@ -12,6 +12,7 @@ const inicioRoutes = require('./routes/inicio');
 const casosRoutes = require('./routes/casosRoutes');
 const usuarioRoutes = require('./routes/usuario');
 const listadosRoutes = require('./routes/listadosRoutes');
+const clientesRoutes = require('./routes/clientesRoutes');
 
 const app = express();
 
@@ -50,7 +51,7 @@ app.use('/api/user', usuarioRoutes);
 app.use('/api/inicio', inicioRoutes);
 app.use('/api/casos', casosRoutes);
 app.use('/api/listados', listadosRoutes);
-
+app.use('/api/clientes', clientesRoutes);
 
 // --- INICIAR SERVIDOR ---
 const PORT = process.env.PORT || 3000;

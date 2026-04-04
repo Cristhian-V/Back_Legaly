@@ -101,9 +101,7 @@ router.post('/', verifyToken, async (req, res) => {
                 error: 'Los campos area_legal, cliente_id, descripcion_corta, descripcion_completa, responsable_id y fecha_inicio son obligatorios.' 
             });
         }
-        // 4. Asignación del responsable
-        // Si mandan un responsable_id lo usamos; si no, asignamos al usuario que está creando el caso
-        const abogadoAsignado = req.user.userId;
+        
         const estado_id = 1; // Por defecto, el caso se crea como "Activo"
         const sub_estado = 'Activo'; // Sub-estado inicial
         const creado_en = new Date(); // Fecha actual
@@ -111,8 +109,8 @@ router.post('/', verifyToken, async (req, res) => {
         // 5. Guardar el caso en PostgreSQL
         const insertQuery = `
             INSERT INTO casos 
-            (area_legal_id, expediente_id, cliente_id, responsable_id, descripcion_corta, descripcion_completa, contraparte, fecha_inicio, fecha_vencimiento, estado_id, sub_estado, progreso_porcentaje, creado_en) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) 
+            (area_legal_id, expediente_id, cliente_id, responsable_id, descripcion_corta, descripcion_completa, contraparte, fecha_inicio, fecha_cierre, estado_id, sub_estado, creado_en) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
             RETURNING caso_id; -- RETURNING * nos devuelve toda la fila recién creada
         `;
 
@@ -120,15 +118,14 @@ router.post('/', verifyToken, async (req, res) => {
             area_legal_id,
             "TEMP", 
             cliente_id, 
-            abogadoAsignado,
+            responsable_id,
             descripcion_corta, 
             descripcion_completa, 
             contraparte, 
             fecha_inicio,
-            null, // fecha_vencimiento
+            null, // fecha_cierre
             estado_id, 
             sub_estado,
-            0, // progreso_porcentaje
             creado_en
         ];
 

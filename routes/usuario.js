@@ -5,7 +5,7 @@ const router = express.Router();
 const verifyToken = require('../middlewares/verifyToken');
 
 // Ruta de Registro
-router.post('/register', verifyToken,async (req, res) => {
+router.post('/register',async (req, res) => {
     try {
         const { 
           name_user, 
