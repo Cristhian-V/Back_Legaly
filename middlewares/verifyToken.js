@@ -3,8 +3,6 @@ const jwt = require('jsonwebtoken');
 
 const verifyToken = (req, res, next) => {
     const token = req.cookies.token;
-
-    console.log("Token recibido en middleware:", token);
     if (!token) {
         return res.status(401).json({ error: 'Acceso denegado. Necesitas iniciar sesión.' });
     }
