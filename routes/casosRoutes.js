@@ -9,8 +9,6 @@ router.get("/", verifyToken, async (req, res) => {
     const usuarioId = req.user.userId;
     const tipoVista = req.query.tipo || "activos"; // Si no envían nada, por defecto es 'activos'
 
-    console.log("Usuario solicitando casos:", req.user);
-
     // 1. Obtener el rol del usuario
     const usuarioRol = await pool.query(
       `SELECT rol_id FROM usuarios WHERE id = $1`,
@@ -167,7 +165,6 @@ router.post("/", verifyToken, async (req, res) => {
 router.get("/:id", verifyToken, async (req, res) => {
   try {
     const casoId = req.params.id;
-    const usuarioId = req.user.userId;
 
     // 1. Verificar si el usuario es el responsable del caso o es administrador
     const caso = await pool.query(
@@ -185,6 +182,36 @@ router.get("/:id", verifyToken, async (req, res) => {
 	    JOIN estados_caso e ON e.id = c.estado_id 
 	    JOIN categorias_cliente ca ON ca.id = cli.categoria_id
     WHERE expediente_id = $1`,
+      [casoId],
+    );
+
+    if (caso.rows.length === 0) {
+      return res.status(404).json({ error: "Caso no encontrado" });
+    }
+
+    // 2. Devolver los datos del caso
+    res.json({ caso: caso.rows[0] });
+  } catch (error) {
+    console.error("Error al obtener el caso:", error);
+    res
+      .status(500)
+      .json({ error: "Error interno al intentar obtener el caso" });
+  }
+});
+
+
+router.get("/formData/:id", verifyToken, async (req, res) => {
+  try {
+    const casoId = req.params.id;
+
+    // 1. Verificar si el usuario es el responsable del caso o es administrador
+    const caso = await pool.query(
+      `SELECT 
+		    cliente_id,
+		    area_legal_id,
+		    responsable_id
+      FROM casos 
+      WHERE expediente_id =  $1`,
       [casoId],
     );
 
