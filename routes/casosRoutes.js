@@ -162,6 +162,52 @@ router.post("/", verifyToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// RUTA: MODIFICACION DE UN CASO (PUT /casos/:id)
+// ==========================================
+router.put("/:id", verifyToken, async (req, res) => {
+  try {
+    const casoId = req.params.id;
+    const {
+      area_legal_id,
+      cliente_id,
+      responsable_id,
+      descripcion_corta,
+      descripcion_completa,
+      contraparte,
+    } = req.body;
+
+    await pool.query(
+      `UPDATE casos 
+       SET area_legal_id = $1, cliente_id = $2, responsable_id = $3, descripcion_corta = $4, descripcion_completa = $5, contraparte = $6
+       WHERE expediente_id = $7`,
+      [
+        area_legal_id,
+        cliente_id,
+        responsable_id,
+        descripcion_corta,
+        descripcion_completa,
+        contraparte,
+        casoId,
+      ],
+    );
+
+    // 6. Enviamos respuesta de éxito
+    res.json({
+      message: "Caso actualizado exitosamente",
+    });
+  } catch (error) {
+    console.error("Error al actualizar caso:", error);
+    res
+      .status(500)
+      .json({ error: "Error interno al intentar actualizar el caso" });
+  }
+});
+
+// ==========================================
+// RUTA: TRAER LOS DETALLES DE UN CASO (GET /casos/:id)
+// ==========================================
+
 router.get("/:id", verifyToken, async (req, res) => {
   try {
     const casoId = req.params.id;
@@ -199,6 +245,9 @@ router.get("/:id", verifyToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// RUTA: TRAER LOS DATOS PARA EL FORMULARIO DE EDICIÓN DE UN CASO (GET /casos/formData/:id)
+// ==========================================
 
 router.get("/formData/:id", verifyToken, async (req, res) => {
   try {
