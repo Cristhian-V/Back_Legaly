@@ -20,6 +20,7 @@ router.get('/', verifyToken, async (req, res) => {
         const estadosCasoQuery = pool.query(`SELECT id, nombre FROM estados_caso ORDER BY id ASC`);
         const areaLegalQuery = pool.query(`SELECT id, nombre FROM area_legal ORDER BY nombre ASC`);
         const tiposEventoQuery = pool.query(`SELECT id, nombre FROM tipos_evento_cal ORDER BY id ASC`);
+        const tiposDocumentoQuery = pool.query(`SELECT id, nombre FROM tipo_documento ORDER BY id ASC`);
 
         // 2. Ejecutamos TODAS las consultas AL MISMO TIEMPO con Promise.all
         // El servidor espera aquí hasta que las 8 consultas terminen de forma simultánea
@@ -31,7 +32,8 @@ router.get('/', verifyToken, async (req, res) => {
             categoriasRes, 
             estadosCasoRes, 
             areaLegalRes, 
-            tiposEventoRes
+            tiposEventoRes,
+            tiposDocumentoRes
         ] = await Promise.all([
             clientesQuery, 
             usuariosQuery,
@@ -40,10 +42,11 @@ router.get('/', verifyToken, async (req, res) => {
             categoriasClienteQuery,
             estadosCasoQuery,
             areaLegalQuery,
-            tiposEventoQuery
+            tiposEventoQuery,
+            tiposDocumentoQuery
         ]);
 
-        // 3. Empaquetamos y enviamos todo súper organizado al Frontend
+        // 3. Empaquetamos y enviamos todo organizado al Frontend
         res.json({
             clientes: clientesRes.rows,
             usuarios: usuariosRes.rows,
@@ -53,7 +56,8 @@ router.get('/', verifyToken, async (req, res) => {
                 categorias_cliente: categoriasRes.rows,
                 estados_caso: estadosCasoRes.rows,
                 area_legal: areaLegalRes.rows,
-                tipos_evento: tiposEventoRes.rows
+                tipos_evento: tiposEventoRes.rows,
+                tipos_documento: tiposDocumentoRes.rows 
             }
         });
 
