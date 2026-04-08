@@ -67,16 +67,18 @@ router.get('/:id/documentacion', verifyToken, async (req, res) => {
     const casoId = req.params.id;
     const query = `
             SELECT 
+              d.id,
               d.nombre,
               t.nombre AS tipo_Documento,
               d.fecha_subida,
               u.nombre_completo AS Responsable,
-              d.pesoMB
+              d.pesoMB,
+              d.url_archivo
             FROM documentos d
             JOIN casos c ON c.caso_id = d.caso_id
             JOIN usuarios u ON u.id = d.subido_por_id
             JOIN tipo_documento t ON t.id = d.tipo_documento_id
-            WHERE c.expediente_id = $1
+            WHERE c.expediente_id = $1 and d.estado_doc = true
             `;
 
     const documentacion = await pool.query(query, [casoId]);
@@ -148,6 +150,59 @@ router.post('/:id/documentacion', verifyToken, (req, res) => {
       res.status(500).json({ error: 'Error al registrar la documentación en el sistema' });
     }
   });
+});
+
+// RUTA GET: Para VER el documento enviando la ruta exacta
+router.get('/ver', (req, res) => {
+  // Extraemos la ruta que enviamos desde React (?ruta=...)
+  const rutaCompleta = req.query.ruta;
+  console.log("Ruta completa recibida para ver el documento:", rutaCompleta);
+
+  if (!rutaCompleta) {
+    return res.status(400).json({ error: 'No se proporcionó la ruta del archivo.' });
+  }
+
+  // Comprobamos si el archivo realmente existe en el disco duro del servidor
+  if (fs.existsSync(rutaCompleta)) {
+    // res.sendFile agarra el archivo de esa ruta y lo dibuja en el navegador
+    res.sendFile(rutaCompleta);
+  } else {
+    // Si el registro está en la BD pero alguien borró el PDF físicamente de la carpeta
+    res.status(404).send('El documento no existe físicamente en el servidor o fue movido.');
+  }
+});
+
+// RUTA DELETE: Usamos /:id en la URL (Mejor práctica para DELETE)
+router.delete('/:id/eliminar', verifyToken, async (req, res) => {
+  try {
+    // 1. Extraemos el ID directamente desde la URL (params)
+    const id = req.params.id; 
+    console.log("ID del documento a eliminar:", id);
+
+    // 2. Buscamos el archivo en la base de datos (AHORA ESTÁ DENTRO DEL TRY)
+    const resultadoBusqueda = await pool.query('SELECT url_archivo FROM documentos WHERE id = $1', [id]);
+
+    // 3. Validamos que el documento realmente exista en la BD
+    if (resultadoBusqueda.rows.length === 0) {
+      return res.status(404).json({ error: 'El documento no existe o ya fue eliminado.' });
+    }
+
+    const urlFisica = resultadoBusqueda.rows[0].url_archivo;
+
+    // 4. Lo borramos físicamente del disco duro si existe
+    if (urlFisica && fs.existsSync(urlFisica)) {
+      fs.unlinkSync(urlFisica); 
+    }
+
+    // 5. Hacemos el DELETE lógico en PostgreSQL (Usando la variable 'id', no 'docId')
+    await pool.query('UPDATE documentos SET estado_doc = false WHERE id = $1', [id]);
+
+    res.status(200).json({ mensaje: 'Documento eliminado correctamente' });
+
+  } catch (error) {
+    console.error("Error al eliminar el archivo:", error);
+    res.status(500).json({ error: 'No se pudo eliminar el documento.' });
+  }
 });
 
 module.exports = router;
