@@ -163,6 +163,39 @@ router.post("/", verifyToken, async (req, res) => {
 });
 
 // ==========================================
+// RUTA DE EQUIPO LEGAL DEL CASO (GET /casos/equipo)
+// ==========================================
+router.get("/equipo", verifyToken, async (req, res) => {
+  try {
+    console.log("Usuario ID extraído del token:", req.body);
+    const {expedienteId} = req.query; 
+    const equipoQuery = `
+            SELECT 
+              u.id,
+              u.nombre_completo,
+              u.avatar_url,
+              u.email,
+              u.telefono,
+              g.titulo,
+              g.nombre AS descripcion_titulo
+            FROM casos c
+            JOIN equipo_caso e ON e.caso_id = c.caso_id
+            JOIN usuarios u ON u.id = e.usuario_id
+            JOIN grados_academicos g ON g.id = u.grado_id
+            WHERE c.expediente_id = $1
+            `;
+    const equipo = await pool.query(equipoQuery, [expedienteId]);
+
+    res.json({ equipo: equipo.rows });
+  } catch (error) {
+    console.error("Error al obtener el equipo del caso:", error);
+    res
+      .status(500)
+      .json({ error: "Error interno al intentar obtener el equipo del caso" });
+  }
+});
+
+// ==========================================
 // RUTA: MODIFICACION DE UN CASO (PUT /casos/:id)
 // ==========================================
 router.put("/:id", verifyToken, async (req, res) => {
@@ -211,7 +244,6 @@ router.put("/:id", verifyToken, async (req, res) => {
 router.get("/:id", verifyToken, async (req, res) => {
   try {
     const casoId = req.params.id;
-
     // 1. Verificar si el usuario es el responsable del caso o es administrador
     const caso = await pool.query(
       `SELECT 
