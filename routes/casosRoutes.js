@@ -167,8 +167,8 @@ router.post("/", verifyToken, async (req, res) => {
 // ==========================================
 router.get("/equipo", verifyToken, async (req, res) => {
   try {
-    console.log("Usuario ID extraído del token:", req.body);
-    const {expedienteId} = req.query; 
+    
+    const {expediente_id} = req.query; 
     const equipoQuery = `
             SELECT 
               u.id,
@@ -184,7 +184,7 @@ router.get("/equipo", verifyToken, async (req, res) => {
             JOIN grados_academicos g ON g.id = u.grado_id
             WHERE c.expediente_id = $1
             `;
-    const equipo = await pool.query(equipoQuery, [expedienteId]);
+    const equipo = await pool.query(equipoQuery, [expediente_id]);
 
     res.json({ equipo: equipo.rows });
   } catch (error) {
@@ -194,6 +194,127 @@ router.get("/equipo", verifyToken, async (req, res) => {
       .json({ error: "Error interno al intentar obtener el equipo del caso" });
   }
 });
+
+// ==========================================
+// RUTA: agregar un miembro al equipo legal del caso (POST /casos/equipo)
+// ==========================================
+router.post("/equipo", verifyToken, async (req, res) => {
+  try {
+    const { expediente_id, usuario_id } = req.body;
+    const insertQuery = `
+            INSERT INTO equipo_caso (caso_id, usuario_id) 
+            VALUES ((SELECT caso_id FROM casos WHERE expediente_id = $1), $2);
+        `;
+    const nuevoMiembro = await pool.query(insertQuery, [expediente_id, usuario_id]);
+    res.status(201).json({
+      message: "Miembro agregado al equipo legal del caso",
+    });
+  } catch (error) {
+    console.error("Error al agregar miembro al equipo del caso:", error);
+    res
+      .status(500)
+      .json({ error: "Error interno al intentar agregar miembro al equipo del caso" });
+  }
+});
+
+// ==========================================
+// RUTA: eliminar un miembro del equipo legal del caso (DELETE /casos/equipo)
+// ==========================================
+router.delete("/equipo", verifyToken, async (req, res) => {
+  try {
+    const { expediente_id, usuario_id } = req.body;
+    const deleteQuery = `
+            DELETE FROM equipo_caso 
+            WHERE usuario_id = $1 AND caso_id = (SELECT caso_id FROM casos WHERE expediente_id = $2);
+        `;  
+    await pool.query(deleteQuery, [usuario_id, expediente_id]);
+    res.json({
+      message: "Miembro eliminado del equipo legal del caso",
+    });
+  } catch (error) {
+    console.error("Error al eliminar miembro del equipo del caso:", error);
+    res
+      .status(500)
+      .json({ error: "Error interno al intentar eliminar miembro del equipo del caso" });
+  }
+});
+
+// ==========================================
+// RUTA: OBTENER HISTORIAL DE UN CASO (GET)
+// ==========================================
+router.get('/:id/historial', verifyToken, async (req, res) => {
+    try {
+        const casoId = req.params.id;
+
+        // 1. Buscamos el ID numérico interno del caso (si envían el expediente_id como CIV-2024-001)
+        const casoData = await pool.query(`SELECT caso_id FROM casos WHERE expediente_id = $1`, [casoId]);
+        if (casoData.rows.length === 0) {
+            return res.status(404).json({ error: 'Caso no encontrado' });
+        }
+
+        const idInterno = casoData.rows[0].caso_id;
+
+        // 2. Consulta SQL: Traemos todo ordenado desde el más reciente al más antiguo
+        const queryHistorial = `
+            SELECT 
+                h.id,
+                t.codigo AS tipo,
+                h.titulo,
+                h.descripcion,
+                TO_CHAR(h.fecha_hito, 'YYYY-MM-DD') AS fecha_agrupacion, -- Ej: 2026-04-16 (Usada para agrupar)
+                TO_CHAR(h.fecha_hito, 'DD/MM/YYYY') AS fecha_formateada, -- Ej: 16/04/2026 (Para mostrar)
+                TO_CHAR(h.fecha_hito, 'HH12:MI AM') AS hora,             -- Ej: 02:25 PM
+                u.nombre_completo AS autor_nombre,
+                u.avatar_url AS autor_avatar
+            FROM historial_caso h
+            JOIN tipos_historial_caso t ON h.tipo_historial_id = t.id
+            LEFT JOIN usuarios u ON h.usuario_id = u.id
+            WHERE h.caso_id = $1
+            ORDER BY h.fecha_hito DESC;
+        `;
+
+        const historialDB = await pool.query(queryHistorial, [idInterno]);
+
+        // 3.  Agrupamos los datos por fecha usando JavaScript
+        const historialAgrupado = historialDB.rows.reduce((acumulador, evento) => {
+            const fecha = evento.fecha_agrupacion; // Usamos YYYY-MM-DD como llave
+            
+            // Si es la primera vez que vemos esta fecha, creamos un grupo para ella
+            if (!acumulador[fecha]) {
+                acumulador[fecha] = {
+                    fecha_etiqueta: evento.fecha_formateada, // Lo que verá el usuario
+                    eventos: []
+                };
+            }
+            
+            // Metemos el evento dentro del grupo de su fecha
+            acumulador[fecha].eventos.push({
+                id: evento.id,
+                tipo: evento.tipo,
+                titulo: evento.titulo,
+                descripcion: evento.descripcion,
+                hora: evento.hora,
+                autor: evento.autor_nombre || 'Sistema', // Si es null, decimos que fue el Sistema
+                avatar: evento.autor_avatar
+            });
+            
+            return acumulador;
+        }, {});
+
+        // 4. Convertimos el objeto agrupado en un Array ordenado para que React lo lea fácilmente con un .map()
+        const resultadoFinal = Object.values(historialAgrupado);
+
+        res.json({
+            total_eventos: historialDB.rows.length,
+            historial: resultadoFinal
+        });
+
+    } catch (error) {
+        console.error('Error al obtener el historial:', error);
+        res.status(500).json({ error: 'Error interno al cargar la bitácora del caso.' });
+    }
+});
+
 
 // ==========================================
 // RUTA: MODIFICACION DE UN CASO (PUT /casos/:id)

@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const verifyToken = require('../middlewares/verifyToken');
 const fs = require('fs');
+const { registrarHistorial } = require('../utils/historialHelper');
 
 // Ruta absoluta base
 const RUTA_DESTINO_BASE = 'D:/Cristhian Dev/AlaizaPedraza/Documentos';
@@ -82,7 +83,17 @@ router.get('/:id/documentacion', verifyToken, async (req, res) => {
             `;
 
     const documentacion = await pool.query(query, [casoId]);
-    res.json({ documentacion: documentacion.rows });
+    const documentosConExtension = documentacion.rows.map(doc => {
+      // path.extname devuelve ".pdf". Con .replace('.', '') lo dejamos limpio como "pdf"
+      const ext = path.extname(doc.nombre).replace('.', '').toLowerCase();
+      
+      return {
+        ...doc,           // Mantiene todos los datos originales (id, nombre, etc.)
+        extension: ext    // Agrega la nueva columna virtual
+      };
+    });
+
+    res.json({ documentacion: documentosConExtension });
   } catch (error) {
     console.error('Error al obtener la documentación:', error);
     res.status(500).json({ error: 'Error al obtener la documentación del caso' });
@@ -95,7 +106,7 @@ router.get('/:id/documentacion', verifyToken, async (req, res) => {
 router.post('/:id/documentacion', verifyToken, (req, res) => {
 
   upload.single('archivo')(req, res, async function (err) {
-
+    
     if (err) {
       if (err.message === 'ARCHIVO_DUPLICADO') {
         return res.status(400).json({ error: 'El archivo que quiere subir ya existe en este expediente.' });
@@ -120,11 +131,15 @@ router.post('/:id/documentacion', verifyToken, (req, res) => {
         return res.status(404).json({ error: 'Caso no encontrado' });
       }
 
+      const nombreOriginal = req.file.filename;
+
+      // 2. HACEMOS EL INSERT (Sin la URL final aún) PARA OBTENER EL ID
+      // Fíjate que al final usamos RETURNING id
       const insertQuery = `
             INSERT INTO documentos 
             (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB) 
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING *;
+            RETURNING id;
         `;
 
       const nuevaDocumentacion = await pool.query(insertQuery, [
@@ -137,17 +152,154 @@ router.post('/:id/documentacion', verifyToken, (req, res) => {
         Math.trunc((req.file.size / (1024 * 1024))) 
       ]);
 
+      const nuevoId = nuevaDocumentacion.rows[0].id;
+
+      // 3. RENOMBRAMOS EL ARCHIVO FÍSICO AÑADIENDO EL ID EN SU MISMA CARPETA
+      const nombreConId = `${nuevoId}_${nombreOriginal}`; 
+      
+      // Magia aquí: Obtenemos la carpeta exacta donde Multer guardó el archivo (Ej: .../2024/CIV-001)
+      const carpetaDinamica = path.dirname(req.file.path); 
+      const rutaFisicaNueva = path.join(carpetaDinamica, nombreConId);
+
+      // Node.js renombra el archivo sin sacarlo de su carpeta
+      fs.renameSync(req.file.path, rutaFisicaNueva);
+
+      // 4. ACTUALIZAMOS LA BASE DE DATOS CON LA RUTA Y NOMBRE FINALES
+      const updateQuery = `
+          UPDATE documentos 
+          SET nombre = $1, url_archivo = $2 
+          WHERE id = $3 
+          RETURNING *;
+      `;
+
+      const documentoFinal = await pool.query(updateQuery, [nombreConId, rutaFisicaNueva, nuevoId]);
+
+      // REGISTRAR EN EL HISTORIAL
+      await registrarHistorial(
+          casoData.rows[0].caso_id,      // ID del caso
+          usuario_id,                    // ID del abogado
+          'carga_doc',                   // El código de tu tabla catálogo
+          'Carga de Documento',  // Título
+          `Se subió el archivo: "${nombreConId}".` // Descripción dinámica
+      );
+
       res.status(201).json({
-        message: 'Documento subido y registrado exitosamente',
-        documentacion: nuevaDocumentacion.rows[0]
+        message: 'Documento subido y registrado exitosamente con su ID.',
+        documentacion: documentoFinal.rows[0]
       });
 
     } catch (error) {
-      console.error('Error al guardar en base de datos:', error);
-      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      console.error('Error en base de datos:', error);
+      // Si algo falla, borramos el archivo temporal
+      if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      res.status(500).json({ error: 'Error al registrar la documentación en el sistema' });
+      res.status(500).json({ error: 'Error al registrar la documentación' });
+    }
+  });
+});
+
+// ==========================================
+// 3. SUBIR NUEVA VERSIÓN DE DOCUMENTO (POST)
+// ==========================================
+router.post('/:id/nueva_version', verifyToken, (req, res) => {
+  upload.single('archivo')(req, res, async function (err) {
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Debes adjuntar el nuevo documento.' });
+    }
+
+    const documentoId = req.params.id; // ¡Ahora este ID será el mismo para siempre!
+    const usuarioId = req.user.userId;
+
+    try {
+      // 1. Buscar el documento ACTUAL en la base de datos
+      const queryActual = await pool.query('SELECT * FROM documentos WHERE id = $1', [documentoId]);
+      
+      if (queryActual.rows.length === 0) {
+        fs.unlinkSync(req.file.path);
+        return res.status(404).json({ error: 'El documento no existe.' });
+      }
+
+      const docActual = queryActual.rows[0];
+
+      // 2. CONSULTAR VERSIONES PARA CALCULAR EL NÚMERO
+      const versionQuery = await pool.query(
+          `SELECT version_doc FROM control_versiones 
+           WHERE documento_id = $1 
+           ORDER BY id DESC LIMIT 1`, 
+          [documentoId]
+      );
+
+      let numeroVersion = 1; 
+
+      const extension = path.extname(docActual.nombre); 
+      let nombreSinExtension = path.basename(docActual.nombre, extension);
+
+      if (versionQuery.rows.length > 0 && versionQuery.rows[0].version_doc != null) {
+        numeroVersion = parseInt(versionQuery.rows[0].version_doc) + 1;
+        nombreSinExtension = nombreSinExtension.replace(/_V\d+$/, '');  
+      } 
+
+      // 3. ARCHIVAR EL ARCHIVO VIEJO FÍSICAMENTE
+      const nombreViejoArchivado = `${nombreSinExtension}_V${numeroVersion}${extension}`;
+      const rutaFisicaVieja = docActual.url_archivo; 
+      const carpetaCorrecta = path.dirname(rutaFisicaVieja);
+      const rutaFisicaViejaArchivada = path.join(carpetaCorrecta, nombreViejoArchivado);
+          
+      if (fs.existsSync(rutaFisicaVieja)) {
+        // Renombramos el archivo viejo (ej. 42_memorial.pdf -> 42_memorial_V1.pdf)
+        fs.renameSync(rutaFisicaVieja, rutaFisicaViejaArchivada);
+      }
+
+      // 4. REGISTRAR EL ARCHIVO VIEJO EN EL CONTROL DE VERSIONES
+      // Guardamos la URL de donde quedó el archivo viejo archivado
+      await pool.query(`
+        INSERT INTO control_versiones (documento_id, modificado_por_id, fecha_modificacion, comentarios_cambio, caso_id, version_doc, doc_url)
+        VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6)
+      `, [documentoId, usuarioId, req.body.comentarios || null, docActual.caso_id, numeroVersion, rutaFisicaViejaArchivada]);
+
+      // 5. PROCESAR EL NUEVO ARCHIVO SUBIDO
+      // Le ponemos el prefijo del ID (que nunca cambia) al nuevo archivo
+      const nombreNuevoOriginal = req.file.filename; 
+      const nombreConIdNuevo = `${documentoId}_${nombreNuevoOriginal}`; 
+      
+      const rutaFisicaNueva = path.join(carpetaCorrecta, nombreConIdNuevo);
+
+      // Movemos el archivo nuevo de la carpeta temporal de Multer a su lugar final
+      fs.renameSync(req.file.path, rutaFisicaNueva);
+
+      // 6. ACTUALIZAR EL REGISTRO PRINCIPAL EN LA BD
+      // Ahora la tabla documentos SIEMPRE apunta a la versión más reciente
+      const updateQuery = `
+          UPDATE documentos 
+          SET nombre = $1, url_archivo = $2, fecha_subida = CURRENT_TIMESTAMP, subido_por_id = $3
+          WHERE id = $4 
+          RETURNING *;
+      `;
+      const documentoFinal = await pool.query(updateQuery, [nombreConIdNuevo, rutaFisicaNueva, usuarioId, documentoId]);
+
+      // 7. REGISTRAR EN EL HISTORIAL DE AUDITORÍA
+      await registrarHistorial(
+          docActual.caso_id,             // ID del caso
+          usuarioId,                     // ID del abogado
+          'modificacion_doc',            // Código
+          'Actualización de Documento',  // Título
+          `El archivo "${nombreSinExtension}" fue actualizado a la versión ${numeroVersion + 1}.` 
+      );
+
+      res.status(201).json({
+        mensaje: `Documento actualizado con éxito. El original se guardó como versión ${numeroVersion}.`,
+        documento: documentoFinal.rows[0]
+      });
+
+    } catch (error) {
+      console.error('Error al procesar la nueva versión:', error);
+      // Limpieza de emergencia si algo falla
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      res.status(500).json({ error: 'Error interno al actualizar la versión del documento.' });
     }
   });
 });
@@ -177,10 +329,10 @@ router.delete('/:id/eliminar', verifyToken, async (req, res) => {
   try {
     // 1. Extraemos el ID directamente desde la URL (params)
     const id = req.params.id; 
-    console.log("ID del documento a eliminar:", id);
+    const usuarioId = req.user.userId;
 
     // 2. Buscamos el archivo en la base de datos (AHORA ESTÁ DENTRO DEL TRY)
-    const resultadoBusqueda = await pool.query('SELECT url_archivo FROM documentos WHERE id = $1', [id]);
+    const resultadoBusqueda = await pool.query('SELECT url_archivo, nombre, caso_id FROM documentos WHERE id = $1', [id]);
 
     // 3. Validamos que el documento realmente exista en la BD
     if (resultadoBusqueda.rows.length === 0) {
@@ -188,6 +340,8 @@ router.delete('/:id/eliminar', verifyToken, async (req, res) => {
     }
 
     const urlFisica = resultadoBusqueda.rows[0].url_archivo;
+    const nombreDocumento = resultadoBusqueda.rows[0].nombre;
+    const casoId = resultadoBusqueda.rows[0].caso_id;
 
     // 4. Lo borramos físicamente del disco duro si existe
     if (urlFisica && fs.existsSync(urlFisica)) {
@@ -196,6 +350,15 @@ router.delete('/:id/eliminar', verifyToken, async (req, res) => {
 
     // 5. Hacemos el DELETE lógico en PostgreSQL (Usando la variable 'id', no 'docId')
     await pool.query('UPDATE documentos SET estado_doc = false WHERE id = $1', [id]);
+
+    // REGISTRAR EN EL HISTORIAL
+    await registrarHistorial(
+        casoId,     // ID del caso
+        usuarioId,                    // ID del abogado
+        'eliminacion_doc',                   // El código de tu tabla catálogo
+        'Eliminación de Documento',  // Título
+        `Se eliminó el documento: "${nombreDocumento}".` // Descripción dinámica
+    );
 
     res.status(200).json({ mensaje: 'Documento eliminado correctamente' });
 
