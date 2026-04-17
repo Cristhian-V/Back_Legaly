@@ -148,5 +148,49 @@ router.get('/eventos', verifyToken, async (req, res) => {
     }
 });
 
+// ==========================================
+// OBTENER CASOS PENDIENTES DE REVISIÓN (GET)
+// ==========================================
+router.get('/revisiones/pendientes', verifyToken, async (req, res) => {
+    try {
+        // El ID del usuario que está navegando en el sistema (ej. el Socio/Jefe)
+        const revisorId = req.user.userId;
+
+        // Hacemos un JOIN magistral. 
+        // estado_revision_id = 1 significa "Pendiente"
+        const query = `
+            SELECT 
+                r.id AS revision_id,
+                c.expediente_id,
+                c.descripcion_corta,
+                solicitante.nombre_completo AS solicitado_por,
+                r.fecha_envio,
+                r.comentarios_solicitud,
+                r.estado_revision_id AS estado_id
+            FROM revisiones_caso r
+            JOIN casos c ON c.caso_id = r.caso_id
+            JOIN usuarios solicitante ON solicitante.id = r.solicitante_id
+            WHERE r.revisor_id = $1 AND r.estado_revision_id in (1, 4)
+            ORDER BY r.fecha_envio DESC;
+        `;
+
+        const casosPendientes = await pool.query(query, [revisorId]);
+        const totalCasosPendientes = casosPendientes.rows.length
+
+        res.json({
+            mensaje: casosPendientes.rows.length > 0 
+                ? 'Casos pendientes obtenidos exitosamente.' 
+                : 'No tienes revisiones pendientes.',
+            casos_pendientes: totalCasosPendientes,
+            pendientes: casosPendientes.rows
+        });
+
+    } catch (error) {
+        console.error('Error al obtener revisiones pendientes:', error);
+        res.status(500).json({ error: 'Error interno al cargar la bandeja de revisiones.' });
+    }
+});
+
+
 
 module.exports = router;
