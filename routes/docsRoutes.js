@@ -61,6 +61,93 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({ storage: storage, fileFilter: fileFilter });
 
 // ==========================================
+// RUTAS CREAR NUEVO DOCUMENTO
+// ==========================================
+router.post('/:id/crearDocumento', verifyToken, async (req, res) => {
+    try {
+        const expedienteId = req.params.id; 
+        const usuario_id = req.user.userId;
+        const { nombreArchivo, tipoPlantilla, tipoDocumento } = req.body; 
+
+        // 1. OBTENER EL ID INTERNO DEL CASO
+        const casoData = await pool.query(`SELECT caso_id FROM casos WHERE expediente_id = $1`, [expedienteId]);
+
+        if (casoData.rows.length === 0) {
+            return res.status(404).json({ error: 'Caso no encontrado' });
+        }
+        const caso_id = casoData.rows[0].caso_id;
+
+        // 2. DEFINIR LA PLANTILLA ORIGEN
+        let nombrePlantilla = '';
+        if (tipoPlantilla === 'word') nombrePlantilla = 'blank.docx';
+        else if (tipoPlantilla === 'excel') nombrePlantilla = 'blank.xlsx';
+        
+        const templatePath = path.join(__dirname, '../plantillas', nombrePlantilla);
+        const extension = path.extname(nombrePlantilla);
+        const nombreInicial = `${nombreArchivo}${extension}`;
+
+        // 3. PRIMER INSERT PARA OBTENER EL ID AUTOGENERADO
+        // Se envía una url temporal que luego se actualizará
+        const insertQuery = `
+            INSERT INTO documentos 
+            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id;
+        `;
+
+        const nuevaDocumentacion = await pool.query(insertQuery, [
+            caso_id,
+            usuario_id,               
+            nombreInicial,        
+            'ruta_temporal', // Placeholder
+            new Date(),
+            tipoDocumento,
+            0 // Peso inicial aproximado de una plantilla vacía
+        ]);
+
+        const nuevoId = nuevaDocumentacion.rows[0].id;
+
+        // 4. CONSTRUIR LA CARPETA DINÁMICA DESTINO
+        // Como aquí no actúa Multer, debemos recrear la ruta dinámica. 
+        // Ajusta esta línea a la estructura exacta de carpetas que usas en tu sistema.
+        const anio = new Date().getFullYear();
+        const carpetaDinamica = path.join(__dirname, `../uploads/documentos/${anio}/${expedienteId}`);
+
+        // Crear la carpeta si no existe aún para este caso
+        if (!fs.existsSync(carpetaDinamica)) {
+            fs.mkdirSync(carpetaDinamica, { recursive: true });
+        }
+
+        // 5. COPIAR EL ARCHIVO CON EL NOMBRE FINAL (ID_Nombre)
+        const nombreConId = `${nuevoId}_${nombreInicial}`; 
+        const rutaFisicaNueva = path.join(carpetaDinamica, nombreConId);
+
+        // Copiamos la plantilla al destino final
+        fs.copyFileSync(templatePath, rutaFisicaNueva);
+
+        // 6. ACTUALIZAR LA BASE DE DATOS CON LA RUTA Y NOMBRE FINALES
+        const updateQuery = `
+            UPDATE documentos 
+            SET nombre = $1, url_archivo = $2 
+            WHERE id = $3 
+            RETURNING *;
+        `;
+
+        const documentoFinal = await pool.query(updateQuery, [nombreConId, rutaFisicaNueva, nuevoId]);
+
+        res.status(201).json({
+            message: 'Documento en blanco creado y registrado exitosamente.',
+            documentacion: documentoFinal.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en base de datos:', error);
+        res.status(500).json({ error: 'Error al generar la documentación en blanco' });
+    }
+});
+
+
+// ==========================================
 // 1. OBTENER DOCUMENTACIÓN DE UN CASO (GET)
 // ==========================================
 router.get('/:id/documentacion', verifyToken, async (req, res) => {
