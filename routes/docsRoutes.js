@@ -269,6 +269,22 @@ router.post('/:id/nueva_version', verifyToken, (req, res) => {
       // Movemos el archivo nuevo de la carpeta temporal de Multer a su lugar final
       fs.renameSync(req.file.path, rutaFisicaNueva);
 
+      // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+      // Borrar la carpeta "basura" que Multer creó por error
+      // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+      const carpetaTemporalMulter = path.dirname(req.file.path); 
+      
+      // rmdirSync borra carpetas (solo si están vacías, lo cual es muy seguro)
+      if (fs.existsSync(carpetaTemporalMulter)) {
+          try {
+              fs.rmdirSync(carpetaTemporalMulter); 
+          } catch (err) {
+              // Si falla (ej. otro archivo subiéndose al mismo tiempo), no rompemos el servidor
+              console.warn("No se pudo borrar la carpeta temporal:", err.message);
+          }
+      }
+      // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
       // 6. ACTUALIZAR EL REGISTRO PRINCIPAL EN LA BD
       // Ahora la tabla documentos SIEMPRE apunta a la versión más reciente
       const updateQuery = `

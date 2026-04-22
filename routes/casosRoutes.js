@@ -55,12 +55,13 @@ router.get("/", verifyToken, async (req, res) => {
                 a.nombre AS area_legal,
                 u.nombre_completo AS responsable_nombre, 
                 TO_CHAR(c.creado_en, 'DD/MM/YYYY') AS fecha_apertura,
-                e.nombre AS estado_nombre
+                erev.descripcion AS estado_nombre
             FROM casos c
             LEFT JOIN clientes cli ON c.cliente_id = cli.id
             JOIN usuarios u ON c.responsable_id = u.id
             JOIN estados_caso e ON c.estado_id = e.id
             JOIN area_legal a ON c.area_legal_id = a.id
+            JOIN estado_revision erev ON erev.id = c.estado_revision_id
             ${whereClause}
             ORDER BY c.creado_en DESC;
         `;
@@ -241,61 +242,6 @@ router.delete("/equipo", verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: INICIAR REVISIÓN (MARCAR COMO "EN REVISIÓN") (PATCH)
-// ==========================================
-// Ejemplo: PATCH /api/casos/revisiones/5/iniciar
-router.patch('/revisiones/:id/iniciar', verifyToken, async (req, res) => {
-    try {
-        const revisionId = req.params.id
-        const revisorActual = req.user.userId;
-        console.log(`Usuario ${revisorActual} intenta iniciar la revisión con ID ${revisionId}`); 
-        // 1. ACTUALIZAR EL ESTADO A 4 ("En Revisión")
-        // NOTA DE SEGURIDAD: Añadimos "estado_revision_id = 1" para asegurarnos 
-        // de que solo se pueda "iniciar" una revisión que estaba "Pendiente".
-        const updateQuery = `
-            UPDATE revisiones_caso 
-            SET estado_revision_id = 4 
-            WHERE id = $1 AND revisor_id = $2 AND estado_revision_id = 1
-            RETURNING caso_id;
-        `;
-        
-        const resultadoRevision = await pool.query(updateQuery, [revisionId, revisorActual]);
-
-        console.log(resultadoRevision.rows)
-        // Si no devuelve nada, es porque no es su revisión, no existe, o ya había sido iniciada/respondida
-        if (resultadoRevision.rows.length === 0) {
-            return res.status(403).json({ 
-                error: 'No se pudo iniciar la revisión. Verifica que seas el encargado y que la solicitud siga Pendiente.' 
-            });
-        }
-
-        const casoId = resultadoRevision.rows[0].caso_id;
-
-        // 2. REGISTRAR EN EL HISTORIAL DE AUDITORÍA
-        // Usamos el código 'cambio_estado' de tu catálogo
-        await registrarHistorial(
-            casoId, 
-            revisorActual, 
-            'cambio_estado', 
-            'Revisión en Progreso', 
-            'El encargado ha comenzado a revisar los documentos.'
-        );
-
-        const expedienteQuery = await pool.query('SELECT expediente_id FROM casos WHERE caso_id = $1', [casoId]);
-
-        res.json({
-            message: 'El caso ha sido marcado como "En Revisión".',
-            estado_id: 4,
-            expediente_id: expedienteQuery.rows[0].expediente_id
-        });
-
-    } catch (error) {
-        console.error('Error al iniciar la revisión:', error);
-        res.status(500).json({ error: 'Error interno al actualizar el estado de la revisión.' });
-    }
-});
-
-// ==========================================
 // RUTA: OBTENER HISTORIAL DE UN CASO (GET)
 // ==========================================
 router.get('/:id/historial', verifyToken, async (req, res) => {
@@ -321,6 +267,7 @@ router.get('/:id/historial', verifyToken, async (req, res) => {
                 TO_CHAR(h.fecha_hito, 'DD/MM/YYYY') AS fecha_formateada, -- Ej: 16/04/2026 (Para mostrar)
                 TO_CHAR(h.fecha_hito, 'HH12:MI AM') AS hora,             -- Ej: 02:25 PM
                 u.nombre_completo AS autor_nombre,
+                u.id AS autor_id,
                 u.avatar_url AS autor_avatar
             FROM historial_caso h
             JOIN tipos_historial_caso t ON h.tipo_historial_id = t.id
@@ -351,6 +298,7 @@ router.get('/:id/historial', verifyToken, async (req, res) => {
                 descripcion: evento.descripcion,
                 hora: evento.hora,
                 autor: evento.autor_nombre || 'Sistema', // Si es null, decimos que fue el Sistema
+                autor_id: evento.autor_id,
                 avatar: evento.autor_avatar
             });
             
@@ -372,7 +320,39 @@ router.get('/:id/historial', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// ENVIAR CASO / DOCUMENTOS A REVISIÓN (POST)
+// RUTA: OBTENER HISTORIAL DE REVISIONES DE UN CASO (GET)
+// ==========================================
+// Ejemplo: GET /api/casos/EXP-2024-001/revisionActiva
+router.get('/:id/revisionActiva', verifyToken, async (req, res) => {
+    try {
+        const parametroId = req.params.id; // Puede ser el expediente_id (ej. EXP-2024-001
+
+        // 1. OBTENER EL ID INTERNO DEL CASO
+        // Convertimos el expediente de la URL al caso_id numérico
+        const casoQuery = await pool.query('SELECT caso_id FROM casos WHERE expediente_id = $1', [parametroId]);
+        
+        if (casoQuery.rows.length === 0) {
+            return res.status(404).json({ error: 'El caso especificado no existe.' });
+        }
+
+        const casoId = casoQuery.rows[0].caso_id;
+
+        const idActivoQuery = await pool.query('SELECT id FROM revisiones_caso WHERE caso_id = $1 and activo = true', [casoId]);
+        const idActivo = idActivoQuery.rows[0].id;
+        
+
+        res.json({
+            id_activo: idActivo
+        });
+
+    } catch (error) {
+        console.error('Error al obtener el historial de revisiones:', error);
+        res.status(500).json({ error: 'Error interno al cargar el historial del caso.' });
+    }
+});
+
+// ==========================================
+// ENVIAR CASO / DOCUMENTOS A REVISIÓN (POST) SOLICITUD DE REVSION
 // ==========================================
 router.post('/:id/revisiones', verifyToken, async (req, res) => {
     // Para transacciones seguras, pedimos un "cliente" temporal a la base de datos
@@ -403,14 +383,21 @@ router.post('/:id/revisiones', verifyToken, async (req, res) => {
         // Enviamos explícitamente el estado 1 (Pendiente) a 'estado_revision_id'
         const insertQuery = `
             INSERT INTO revisiones_caso 
-            (caso_id, solicitante_id, revisor_id, comentarios_solicitud, estado_revision_id, fecha_envio) 
-            VALUES ($1, $2, $3, $4, 1, $5) 
+            (caso_id, solicitante_id, revisor_id, comentarios_solicitud, estado_revision_id, fecha_envio, activo) 
+            VALUES ($1, $2, $3, $4, 1, $5, true) 
             RETURNING id;
         `;
 
         const fechaEnvio = new Date(); // Fecha actual para el campo 'fecha_envio'        
         const nuevaRevision = await client.query(insertQuery, [casoId, solicitanteId, revisor_id, comentarios_solicitud, fechaEnvio]);
         const revisionId = nuevaRevision.rows[0].id;
+
+        // hacemos el insert a la tabla de casos para marcar el estado_revision_id = 4 ("En Revisión") para que el caso se muestre como "En Revisión" en la lista de casos
+        await client.query(`
+            UPDATE casos 
+            SET estado_revision_id = 1 
+            WHERE caso_id = $1
+        `, [casoId]);
 
         // 4. MARCAR LOS DOCUMENTOS COMO "EN REVISIÓN"
         let cantidadDocumentos = 0;
@@ -461,20 +448,83 @@ router.post('/:id/revisiones', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: RESPONDER A UNA REVISIÓN (PUT)
+// RUTA: INICIAR REVISIÓN (MARCAR COMO "EN REVISIÓN") (PATCH)
+// ==========================================
+// Ejemplo: PATCH /api/casos/revisiones/5/iniciar
+router.patch('/revisiones/:id/iniciar', verifyToken, async (req, res) => {
+    try {
+        const revisionId = req.params.id
+        const revisorActual = req.user.userId;
+        console.log(`Usuario ${revisorActual} intenta iniciar la revisión con ID ${revisionId}`); 
+        // 1. ACTUALIZAR EL ESTADO A 4 ("En Revisión")
+        // NOTA DE SEGURIDAD: Añadimos "estado_revision_id = 1" para asegurarnos 
+        // de que solo se pueda "iniciar" una revisión que estaba "Pendiente".
+        const updateQuery = `
+            UPDATE revisiones_caso 
+            SET estado_revision_id = 4 
+            WHERE id = $1 AND revisor_id = $2 AND estado_revision_id = 1
+            RETURNING caso_id;
+        `;
+        
+        const resultadoRevision = await pool.query(updateQuery, [revisionId, revisorActual]);
+
+        await pool.query(`UPDATE casos 
+            SET estado_revision_id = 4 
+            WHERE caso_id = $1
+        `, [resultadoRevision.rows[0]?.caso_id]);
+
+        console.log(resultadoRevision.rows)
+        // Si no devuelve nada, es porque no es su revisión, no existe, o ya había sido iniciada/respondida
+        if (resultadoRevision.rows.length === 0) {
+            return res.status(403).json({ 
+                error: 'No se pudo iniciar la revisión. Verifica que seas el encargado y que la solicitud siga Pendiente.' 
+            });
+        }
+
+        const casoId = resultadoRevision.rows[0].caso_id;
+
+        // 2. REGISTRAR EN EL HISTORIAL DE AUDITORÍA
+        // Usamos el código 'cambio_estado' de tu catálogo
+        await registrarHistorial(
+            casoId, 
+            revisorActual, 
+            'cambio_estado', 
+            'Revisión en Progreso', 
+            'El encargado ha comenzado a revisar los documentos.'
+        );
+
+        const expedienteQuery = await pool.query('SELECT expediente_id FROM casos WHERE caso_id = $1', [casoId]);
+
+        res.json({
+            message: 'El caso ha sido marcado como "En Revisión".',
+            estado_id: 4,
+            expediente_id: expedienteQuery.rows[0].expediente_id
+        });
+
+    } catch (error) {
+        console.error('Error al iniciar la revisión:', error);
+        res.status(500).json({ error: 'Error interno al actualizar el estado de la revisión.' });
+    }
+});
+
+
+// ==========================================
+// RUTA: RESPONDER A UNA SOLICITUD DE REVISIÓN (PUT)
 // ==========================================
 // Ejemplo: PUT /api/casos/revisiones/5 (donde 5 es el ID de la revisión, no del caso)
 router.put('/revisiones/:id_revision', verifyToken, async (req, res) => {
     const client = await pool.connect();
-
+  console.log(`Usuario ${req.user.userId} intenta responder la revisión con ID ${req.params.id_revision}`);
     try {
         const revisionId = req.params.id_revision;
         const revisorActual = req.user.userId;
         const { estado_revision_id, comentarios_revisor } = req.body;
 
-        // 1. Validamos que el estado exista (2, 3 o 4)
-        if (![2, 3, 4].includes(estado_revision_id)) {
-            return res.status(400).json({ error: 'Debes enviar un estado_revision_id válido (2, 3 o 4).' });
+        console.log(revisionId,revisorActual, estado_revision_id, comentarios_revisor);
+
+        // 1. Validamos que el estado exista (2, 3 o 5)
+        if (![2, 3, 5].includes(estado_revision_id)) {
+            return res.status(400).json({ error: 'Debes enviar un estado_revision_id válido (2, 3 o 5).' });
         }
 
         await client.query('BEGIN'); // Iniciamos transacción de seguridad
@@ -485,7 +535,8 @@ router.put('/revisiones/:id_revision', verifyToken, async (req, res) => {
             SET 
                 estado_revision_id = $1, 
                 comentarios_revisor = $2, 
-                fecha_revision = CURRENT_TIMESTAMP
+                fecha_revision = CURRENT_TIMESTAMP,
+                activo = false 
             WHERE id = $3 AND revisor_id = $4
             RETURNING caso_id;
         `;
@@ -515,11 +566,19 @@ router.put('/revisiones/:id_revision', verifyToken, async (req, res) => {
             `, [casoId]);
         }
 
+        //cambiamos el estado del caso a Aprobado (2) o Con Observaciones (3) con estado_revision_id
+        await client.query(`
+            UPDATE casos 
+            SET estado_revision_id = $1 
+            WHERE caso_id = $2
+        `, [estado_revision_id, casoId]);
+        
+
         await client.query('COMMIT'); // Guardamos los cambios en la BD
 
         // 4. PREPARAR EL HISTORIAL DE AUDITORÍA
         // Obtenemos el texto del estado para que el historial sea legible
-        const nombresEstados = { 2: 'Aprobado', 3: 'Con Observaciones', 4: 'En Revisión' };
+        const nombresEstados = { 2: 'Aprobado', 3: 'Con Observaciones', 5: 'Revisado' };
         const nombreEstadoTexto = nombresEstados[estado_revision_id];
 
         await registrarHistorial(
@@ -600,6 +659,7 @@ router.get("/:id", verifyToken, async (req, res) => {
 	    ca.nombre AS categoria_cliente,
 	    c.expediente_id,
 	    e.nombre AS estado,
+      erev.descripcion AS estado_revision,
 	    c.descripcion_corta AS titulo,
 	    cli.nombre_completo AS nombre_cliente,
 	    c.descripcion_completa AS descripcion,
@@ -609,6 +669,7 @@ router.get("/:id", verifyToken, async (req, res) => {
 	    JOIN clientes cli ON cli.id = c.cliente_id
 	    JOIN estados_caso e ON e.id = c.estado_id 
 	    JOIN categorias_cliente ca ON ca.id = cli.categoria_id
+      JOIN estado_revision erev ON erev.id = c.estado_revision_id
     WHERE expediente_id = $1`,
       [casoId],
     );
@@ -659,5 +720,7 @@ router.get("/formData/:id", verifyToken, async (req, res) => {
       .json({ error: "Error interno al intentar obtener el caso" });
   }
 });
+
+
 
 module.exports = router;
