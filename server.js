@@ -1,5 +1,6 @@
-// Archivo: server.js
 require("dotenv").config(); // Carga las variables de entorno
+
+
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -29,7 +30,7 @@ app.use(helmet());
 // 2. CORS: Define qué dominios (front-end) pueden hablar con tu servidor
 app.use(
   cors({
-    origin: "http://localhost:5173", // Cambia esto por la URL de tu front-end
+    origin:  process.env.CORS_ORIGIN, // Cambia esto por la URL de tu front-end
     credentials: true, // Permite enviar cookies
   }),
 );
