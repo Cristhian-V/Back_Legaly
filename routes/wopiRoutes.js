@@ -9,17 +9,17 @@ router.get('/files/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
         // Buscamos el documento en la base de datos
-        const docQuery = await pool.query('SELECT nombre, ruta_archivo, usuario_id FROM documentos WHERE id = $1', [fileId]);
+        const docQuery = await pool.query('SELECT nombre, url_archivo, subido_por_id FROM documentos WHERE id = $1', [fileId]);
         
         if (docQuery.rows.length === 0) return res.status(404).send('Archivo no encontrado');
         const doc = docQuery.rows[0];
-        const filePath = path.resolve(doc.ruta_archivo); // Ruta física en el servidor
+        const filePath = path.resolve(doc.url_archivo); // Ruta física en el servidor
         const stats = fs.statSync(filePath);
 
         res.json({
             BaseFileName: doc.nombre,
             Size: stats.size,
-            UserId: doc.usuario_id.toString(), // ID del abogado que lo abre
+            UserId: doc.subido_por_id.toString(), // ID del abogado que lo abre
             UserCanWrite: true, // Aquí puedes poner lógica: si el usuario es "Pasante", puedes poner false para que sea solo lectura
             PostMessageOrigin: '*' // Idealmente, el dominio de tu frontend
         });
@@ -33,10 +33,10 @@ router.get('/files/:fileId', async (req, res) => {
 router.get('/files/:fileId/contents', async (req, res) => {
     try {
         const { fileId } = req.params;
-        const docQuery = await pool.query('SELECT ruta_archivo FROM documentos WHERE id = $1', [fileId]);
+        const docQuery = await pool.query('SELECT url_archivo FROM documentos WHERE id = $1', [fileId]);
         if (docQuery.rows.length === 0) return res.status(404).send('Archivo no encontrado');
         
-        const filePath = path.resolve(docQuery.rows[0].ruta_archivo);
+        const filePath = path.resolve(docQuery.rows[0].url_archivo);
         res.sendFile(filePath);
     } catch (error) {
         res.status(500).send('Error enviando archivo');
@@ -47,10 +47,10 @@ router.get('/files/:fileId/contents', async (req, res) => {
 router.post('/files/:fileId/contents', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     try {
         const { fileId } = req.params;
-        const docQuery = await pool.query('SELECT ruta_archivo FROM documentos WHERE id = $1', [fileId]);
+        const docQuery = await pool.query('SELECT url_archivo FROM documentos WHERE id = $1', [fileId]);
         if (docQuery.rows.length === 0) return res.status(404).send('Archivo no encontrado');
         
-        const filePath = path.resolve(docQuery.rows[0].ruta_archivo);
+        const filePath = path.resolve(docQuery.rows[0].url_archivo);
         
         // Sobreescribimos el archivo físico con los nuevos binarios que manda Collabora
         fs.writeFileSync(filePath, req.body);

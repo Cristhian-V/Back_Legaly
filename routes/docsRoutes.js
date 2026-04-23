@@ -6,9 +6,10 @@ const path = require('path');
 const verifyToken = require('../middlewares/verifyToken');
 const fs = require('fs');
 const { registrarHistorial } = require('../utils/historialHelper');
+require('dotenv').config();
 
-// Ruta absoluta base
-const RUTA_DESTINO_BASE = 'D:/Cristhian Dev/AlaizaPedraza/Documentos';
+// Ruta absoluta base DESARROLLO (ajusta esta ruta a tu entorno de producción)
+const RUTA_DESTINO_BASE = process.env.RUTA_DESTINO_BASE;
 
 // ==========================================
 // FUNCIÓN AUXILIAR: Crea la ruta dinámica
@@ -81,6 +82,7 @@ router.post('/:id/crearDocumento', verifyToken, async (req, res) => {
         let nombrePlantilla = '';
         if (tipoPlantilla === 'word') nombrePlantilla = 'blank.docx';
         else if (tipoPlantilla === 'excel') nombrePlantilla = 'blank.xlsx';
+        else if (tipoPlantilla === 'powerpoint') nombrePlantilla = 'blank.pptx';
         
         const templatePath = path.join(__dirname, '../plantillas', nombrePlantilla);
         const extension = path.extname(nombrePlantilla);
@@ -111,7 +113,7 @@ router.post('/:id/crearDocumento', verifyToken, async (req, res) => {
         // Como aquí no actúa Multer, debemos recrear la ruta dinámica. 
         // Ajusta esta línea a la estructura exacta de carpetas que usas en tu sistema.
         const anio = new Date().getFullYear();
-        const carpetaDinamica = path.join(__dirname, `../uploads/documentos/${anio}/${expedienteId}`);
+        const carpetaDinamica = path.join(RUTA_DESTINO_BASE, `${anio}/${expedienteId}`);
 
         // Crear la carpeta si no existe aún para este caso
         if (!fs.existsSync(carpetaDinamica)) {
@@ -411,12 +413,10 @@ router.post('/:id/nueva_version', verifyToken, (req, res) => {
 router.get('/ver', (req, res) => {
   // Extraemos la ruta que enviamos desde React (?ruta=...)
   const rutaCompleta = req.query.ruta;
-  console.log("Ruta completa recibida para ver el documento:", rutaCompleta);
 
   if (!rutaCompleta) {
     return res.status(400).json({ error: 'No se proporcionó la ruta del archivo.' });
   }
-
   // Comprobamos si el archivo realmente existe en el disco duro del servidor
   if (fs.existsSync(rutaCompleta)) {
     // res.sendFile agarra el archivo de esa ruta y lo dibuja en el navegador
