@@ -45,6 +45,39 @@ router.post('/register',async (req, res) => {
     }
 });
 
+
+// ==========================================
+// DATA USUARIOS
+// ==========================================
+router.get('/data', verifyToken, async (req, res) => {
+    try {
+        console.log("pasa por aqui")
+        const userData = await pool.query(
+            `SELECT 
+                u.id, 
+                u.nombre_usuario, 
+                u.nombre_completo, 
+                u.email, 
+                u.rol_id, 
+                r.nombre AS rol_nombre,      -- Nombre real del rol
+                u.estado_id, 
+                u.telefono, 
+                u.biografia, 
+                u.avatar_url, 
+                u.grado_id,
+                g.titulo AS grado_academico_abreviado,
+                g.nombre AS grado_academico
+            FROM usuarios u
+            INNER JOIN roles_usuario r ON u.rol_id = r.id
+            LEFT JOIN grados_academicos g ON u.grado_id = g.id `
+        ); 
+        res.json({ user: userData.rows });
+    } catch (error) {
+        console.error('Error al obtener datos del usuario:', error);
+        res.status(500).json({ error: 'Error al obtener datos del usuario' });
+    }
+});
+
 // ==========================================
 // RUTA 1: DATA USUARIO 
 // ==========================================

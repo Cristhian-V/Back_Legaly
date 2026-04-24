@@ -88,6 +88,8 @@ router.post('/:id/crearDocumento', verifyToken, async (req, res) => {
         const extension = path.extname(nombrePlantilla);
         const nombreInicial = `${nombreArchivo}${extension}`;
 
+        console.log("Ruta de la plantilla:", templatePath);
+        console.log("Nombre:", nombreInicial);
         // 3. PRIMER INSERT PARA OBTENER EL ID AUTOGENERADO
         // Se envía una url temporal que luego se actualizará
         const insertQuery = `
@@ -409,8 +411,8 @@ router.post('/:id/nueva_version', verifyToken, (req, res) => {
   });
 });
 
-// RUTA GET: Para VER el documento enviando la ruta exacta
-router.get('/ver', (req, res) => {
+// RUTA GET: Para descargar el documento enviando la ruta exacta
+router.get('/descargar', (req, res) => {
   // Extraemos la ruta que enviamos desde React (?ruta=...)
   const rutaCompleta = req.query.ruta;
 
