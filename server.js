@@ -1,6 +1,5 @@
 require("dotenv").config(); // Carga las variables de entorno
 
-
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -17,7 +16,7 @@ const docsRoutes = require("./routes/docsRoutes");
 const eventosCalendarioRoutes = require("./routes/EventosCalendarioRouter");
 const clientesRouter = require("./routes/clienteRoutes");
 const wopiRoutes = require("./routes/wopiRoutes");
-const docusueltosRoutes = require("./routes/docsueltosRoutes")
+const docusueltosRoutes = require("./routes/docsueltosRoutes");
 
 const app = express();
 
@@ -31,7 +30,7 @@ app.use(helmet());
 // 2. CORS: Define qué dominios (front-end) pueden hablar con tu servidor
 app.use(
   cors({
-    origin:  process.env.CORS_ORIGIN, // Cambia esto por la URL de tu front-end
+    origin: process.env.CORS_ORIGIN, // Cambia esto por la URL de tu front-end
     credentials: true, // Permite enviar cookies
   }),
 );
@@ -59,8 +58,8 @@ app.use("/api/inicio", inicioRoutes);
 app.use("/api/casos", casosRoutes);
 app.use("/api/listados", listadosRoutes);
 app.use("/api/docs", docsRoutes);
-app.use("/api/calendario", eventosCalendarioRoutes); 
-app.use("/api/cliente", clientesRouter); 
+app.use("/api/eventos", eventosCalendarioRoutes);
+app.use("/api/cliente", clientesRouter);
 app.use("/wopi", wopiRoutes);
 app.use("/api/docsueltos", docusueltosRoutes);
 
