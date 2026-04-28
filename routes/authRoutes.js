@@ -28,10 +28,11 @@ router.post('/login', async (req, res) => {
         }
 
         // 3. Creamos el Token (JWT). Nota: Postgres usa 'id'
+
         const token = jwt.sign(
             { userId: user.id }, 
             process.env.JWT_SECRET, 
-            { expiresIn: '1h' } 
+            { expiresIn: '2h' } 
         );
 
         // 4. Enviamos el token en una Cookie segura

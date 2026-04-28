@@ -2,23 +2,23 @@
 Tono de azules de login y navbar que se amas claro.
 
 DOCUMENTOS
-caratula genrar automaticamanete.
-quitar la parte de tipos de documento
-generar documento desde la plataforma todo officce
-editar desde la plataforma los dcocuemtnos office
-poner ultima fecha de modificacion.
-quitar subido por.
-quitar eliminacion de docuemntos.
+caratula genrar automaticamanete. (PENDIENTE DE QUE ME PASEN EL DOCUMENTO.)
+quitar la parte de tipos de documento (LISTO)
+generar documento desde la plataforma todo officce (LISTO)
+editar desde la plataforma los dcocuemtnos office (LISTO)
+poner ultima fecha de modificacion. (LISTO)
+quitar subido por. (LISTO)
+quitar eliminacion de docuemntos. (LISTO)
 
 
 CREACION DE EXPEDIENTE.
-seelccionar a los contactos de clientes cuando se cree el caso.
-añadir cuadro de seleccion para abogados colaboradores
-todos los campos sean obligatorior.
+seelccionar a los contactos de clientes cuando se cree el caso. (LISTO)
+añadir cuadro de seleccion para abogados colaboradores (LISTO)
+todos los campos sean obligatorior. (LISTO)
 
 
 GENERAL 
 Quitar pa seccion de revisiones.
 
-CLIENTES
-cambiar la forma de visualizacion a filas.
+EQUIPO
+cambiar la forma de visualizacion a filas.(LISTO)

@@ -97,8 +97,8 @@ router.post("/:id/crearDocumento", verifyToken, async (req, res) => {
     // Se envía una url temporal que luego se actualizará
     const insertQuery = `
             INSERT INTO documentos 
-            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB, fecha_modificacion) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id;
         `;
 
@@ -110,6 +110,7 @@ router.post("/:id/crearDocumento", verifyToken, async (req, res) => {
       new Date(),
       tipoDocumento,
       0, // Peso inicial aproximado de una plantilla vacía
+      new Date(),
     ]);
 
     const nuevoId = nuevaDocumentacion.rows[0].id;
@@ -175,7 +176,9 @@ router.get("/:id/documentacion", verifyToken, async (req, res) => {
               d.fecha_subida,
               u.nombre_completo AS Responsable,
               d.pesoMB,
-              d.url_archivo
+              d.url_archivo,
+              TO_CHAR(d.fecha_modificacion, 'DD/MM/YYYY hh:mm:ss') AS fecha_modificacion,
+              d.solicitud_revision
             FROM documentos d
             JOIN casos c ON c.caso_id = d.caso_id
             JOIN usuarios u ON u.id = d.subido_por_id
@@ -247,8 +250,8 @@ router.post("/:id/documentacion", verifyToken, (req, res) => {
       // Fíjate que al final usamos RETURNING id
       const insertQuery = `
             INSERT INTO documentos 
-            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB, fecha_modificacion) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id;
         `;
 
@@ -260,6 +263,7 @@ router.post("/:id/documentacion", verifyToken, (req, res) => {
         new Date(),
         tipoDocumento,
         Math.trunc(req.file.size / (1024 * 1024)),
+        new Date(),
       ]);
 
       const nuevoId = nuevaDocumentacion.rows[0].id;
@@ -422,7 +426,7 @@ router.post("/:id/nueva_version", verifyToken, (req, res) => {
       // Ahora la tabla documentos SIEMPRE apunta a la versión más reciente
       const updateQuery = `
           UPDATE documentos 
-          SET nombre = $1, url_archivo = $2, fecha_subida = CURRENT_TIMESTAMP, subido_por_id = $3
+          SET nombre = $1, url_archivo = $2, fecha_subida = CURRENT_TIMESTAMP, subido_por_id = $3, fecha_modificacion = CURRENT_TIMESTAMP
           WHERE id = $4 
           RETURNING *;
       `;

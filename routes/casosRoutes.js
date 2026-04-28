@@ -145,24 +145,20 @@ router.post("/", verifyToken, async (req, res) => {
     const nuevoCaso = await client.query(insertQuery, valores);
     const casoIdGenerado = nuevoCaso.rows[0].caso_id;
 
+    const areaLegal = await client.query(`
+      SELECT codigo FROM area_legal WHERE id =$1
+      `, [area_legal_id])
+    const areaLegalCodigo = areaLegal.rows[0].codigo
+
     // 5. Generar y actualizar el expediente_id (Ej: "EXP-2026-0001")
     const anioActual = new Date().getFullYear();
-    const expedienteId = `EXP-${anioActual}-${String(casoIdGenerado).padStart(4, "0")}`;
+    const expedienteId = `${areaLegalCodigo}-${anioActual}-${String(casoIdGenerado).padStart(4, "0")}`;
 
     await client.query(
       `UPDATE casos SET expediente_id = $1 WHERE caso_id = $2`,
       [expedienteId, casoIdGenerado],
     );
 
-    // =========================================================
-    // 6. NUEVO: INSERTAR AL RESPONSABLE EN EL EQUIPO DEL CASO
-    // =========================================================
-    // Usamos ON CONFLICT DO NOTHING por seguridad, aunque al ser un caso nuevo no debería haber conflictos
-    await client.query(
-      `INSERT INTO equipo_caso (caso_id, usuario_id) 
-         VALUES ($1, $2) ON CONFLICT (caso_id, usuario_id) DO NOTHING`,
-      [casoIdGenerado, responsable_id],
-    );
 
     // REGISTRAR EN EL HISTORIAL DE AUDITORÍA
     await registrarHistorial(
@@ -202,6 +198,8 @@ router.post("/", verifyToken, async (req, res) => {
   }
 });
 
+
+
 // ==========================================
 // RUTA DE EQUIPO LEGAL DEL CASO (GET /casos/equipo)
 // ==========================================
@@ -235,27 +233,62 @@ router.get("/equipo", verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: agregar un miembro al equipo legal del caso (POST /casos/equipo)
+// RUTA: Agregar miembros al equipo legal del caso (POST /casos/equipo)
 // ==========================================
 router.post("/equipo", verifyToken, async (req, res) => {
+  const client = await pool.connect();
+
   try {
-    const { expediente_id, usuario_id } = req.body;
-    const insertQuery = `
-            INSERT INTO equipo_caso (caso_id, usuario_id) 
-            VALUES ((SELECT caso_id FROM casos WHERE expediente_id = $1), $2);
-        `;
-    const nuevoMiembro = await pool.query(insertQuery, [
-      expediente_id,
-      usuario_id,
-    ]);
+    const { expediente_id, usuarios_ids } = req.body; // Ahora esperamos un array: [2, 4, 7]
+    console.log(usuarios_ids)
+    // 1. VALIDACIÓN DE ENTRADA
+    if (!usuarios_ids || !Array.isArray(usuarios_ids) || usuarios_ids.length === 0) {
+      return res.status(400).json({
+        error: "Debes enviar una lista de usuarios_ids válida."
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // 2. BUSCAR EL ID INTERNO DEL CASO UNA SOLA VEZ (Optimización de rendimiento)
+    const casoQuery = await client.query(
+      "SELECT caso_id FROM casos WHERE expediente_id = $1",
+      [expediente_id]
+    );
+
+    if (casoQuery.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "El caso especificado no existe." });
+    }
+
+    const casoId = casoQuery.rows[0].caso_id;
+
+    // 3. INSERTAR A CADA USUARIO EN EL EQUIPO
+    // Usamos ON CONFLICT DO NOTHING para que, si por error envías un ID de alguien 
+    // que ya estaba en el caso, el servidor lo ignore y no explote.
+    for (const usuario_id of usuarios_ids) {
+      await client.query(`
+        INSERT INTO equipo_caso (caso_id, usuario_id) 
+        VALUES ($1, $2) 
+        ON CONFLICT (caso_id, usuario_id) DO NOTHING
+      `, [casoId, usuario_id]);
+    }
+
+    // 4. CONFIRMAR LA TRANSACCIÓN
+    await client.query("COMMIT");
+
     res.status(201).json({
-      message: "Miembro agregado al equipo legal del caso",
+      message: `Se procesaron ${usuarios_ids.length} miembro(s) para el equipo legal del caso.`,
     });
+
   } catch (error) {
-    console.error("Error al agregar miembro al equipo del caso:", error);
+    await client.query("ROLLBACK");
+    console.error("Error al agregar miembros al equipo del caso:", error);
     res.status(500).json({
-      error: "Error interno al intentar agregar miembro al equipo del caso",
+      error: "Error interno al intentar agregar miembros al equipo del caso.",
     });
+  } finally {
+    client.release();
   }
 });
 
@@ -805,6 +838,58 @@ router.put("/revisiones/:id_revision", verifyToken, async (req, res) => {
       .json({ error: "Error interno al procesar la respuesta de la revisión" });
   } finally {
     client.release();
+  }
+});
+
+// ==========================================
+// RUTA: FINALIZACIÓN / CERRAR UN CASO (PUT /casos/:id/cerrar)
+// ==========================================
+// Nota: Usamos req.params.id asumiendo que envías el expediente_id (Ej: EXP-2026-0001)
+router.put("/:id/cerrar", verifyToken, async (req, res) => {
+  try {
+    const expedienteId = req.params.id;
+    const usuarioId = req.user.userId; // Extraemos quién lo está cerrando
+
+    // Actualizamos el estado a 3, marcamos el sub_estado y registramos la fecha de cierre exacta
+    const updateQuery = `
+      UPDATE casos 
+      SET 
+        estado_id = 3, 
+        sub_estado = 'Cerrado', 
+        fecha_cierre = CURRENT_TIMESTAMP
+        estado_revision_id = 7
+      WHERE expediente_id = $1
+      RETURNING caso_id, expediente_id, descripcion_corta;
+    `;
+
+    const resultado = await pool.query(updateQuery, [expedienteId]);
+
+    // Validamos si el caso realmente existía
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({ error: "El caso especificado no fue encontrado." });
+    }
+
+    const casoCerrado = resultado.rows[0];
+
+    // Registrar esta acción crítica en el historial del caso
+    
+    await registrarHistorial(
+      casoCerrado.caso_id,
+      usuarioId,
+      "cierre_caso",
+      "Caso Finalizado",
+      "El expediente ha sido cerrado oficialmente en el sistema."
+    );
+    
+
+    res.json({
+      message: "Caso cerrado exitosamente.",
+      caso: casoCerrado // Devolvemos algunos datos para que el Frontend pueda actualizar su vista
+    });
+
+  } catch (error) {
+    console.error("Error al cerrar el caso:", error);
+    res.status(500).json({ error: "Error interno al intentar cerrar el caso." });
   }
 });
 

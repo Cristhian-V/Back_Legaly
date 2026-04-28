@@ -211,6 +211,10 @@ router.get('/carpetas/:id_carpeta', verifyToken, async (req, res) => {
     const { id_carpeta } = req.params;
     const userId = req.user.userId;
 
+    const nombre_carpeta = await pool.query(`
+      SELECT nombre_carpeta FROM carpetas where id = $1
+      `, [id_carpeta])
+
     const documentos = await pool.query(`
       SELECT * FROM carpetas c 
         JOIN doc_carpetas dc ON dc.carpeta_id = c.id
@@ -218,7 +222,9 @@ router.get('/carpetas/:id_carpeta', verifyToken, async (req, res) => {
         WHERE e.usuario_id = $1 AND c.id = $2 AND dc.estado_doc = true
         `, [userId, id_carpeta]);
 
-    res.json({ documentos: documentos.rows });
+    res.json({ 
+      nombre_carpeta: nombre_carpeta.rows[0].nombre_carpeta,
+      documentos: documentos.rows });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al traer los documentos de la carpeta.' });
@@ -263,8 +269,8 @@ router.post('/carpetas/:carpeta_id/documentos', verifyToken, (req, res) => {
         // 2. HACEMOS EL INSERT PARA OBTENER EL ID
         const insertQuery = `
             INSERT INTO doc_carpetas 
-            (carpeta_id, nombre, ruta_archivo, subido_por_id, peso_mb) 
-            VALUES ($1, $2, $3, $4, $5)
+            (carpeta_id, nombre, ruta_archivo, subido_por_id, peso_mb, fecha_modificacion) 
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
             RETURNING id;
         `;
 
@@ -407,8 +413,8 @@ router.post('/documentos/:id/vincular-caso', verifyToken, async (req, res) => {
 
     // 5. Insertar en la tabla oficial de `documentos` del caso
     const insertCasoDoc = await client.query(`
-            INSERT INTO documentos (caso_id, subido_por_id, nombre, url_archivo, tipo_documento_id, pesoMB)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+            INSERT INTO documentos (caso_id, subido_por_id, nombre, url_archivo, tipo_documento_id, pesoMB, fecha_modificacion)
+            VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP) RETURNING id
         `, [caso_id, usuarioId, nombreLimpio, rutaTemporalCopia, tipo_documento_id, docSuelto.peso_mb]);
 
     const nuevoDocCasoId = insertCasoDoc.rows[0].id;
@@ -500,8 +506,8 @@ router.post('/carpetas/:carpeta_id/documentos/blanco', verifyToken, async (req, 
         // 3. PRIMER INSERT PARA OBTENER EL ID AUTOGENERADO
         const insertQuery = `
             INSERT INTO doc_carpetas 
-            (carpeta_id, nombre, ruta_archivo, subido_por_id, peso_mb) 
-            VALUES ($1, $2, $3, $4, $5)
+            (carpeta_id, nombre, ruta_archivo, subido_por_id, peso_mb, fecha_modificacion) 
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
             RETURNING id;
         `;
         const nuevaDocumentacion = await client.query(insertQuery, [
@@ -620,19 +626,31 @@ router.get('/files/:fileId/contents', async (req, res) => {
 router.post('/files/:fileId/contents', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     try {
         const { fileId } = req.params;
+        
+        // 1. Buscamos el documento (Corregido: usamos ruta_archivo)
         const docQuery = await pool.query('SELECT ruta_archivo FROM doc_carpetas WHERE id = $1', [fileId]);
         if (docQuery.rows.length === 0) return res.status(404).send('Archivo no encontrado');
         
-        const filePath = path.resolve(docQuery.rows[0].url_archivo);
+        // CORRECCIÓN APLICADA AQUÍ: Leemos 'ruta_archivo', no 'url_archivo'
+        const filePath = path.resolve(docQuery.rows[0].ruta_archivo); 
         
-        // Sobreescribimos el archivo físico con los nuevos binarios que manda Collabora
+        // 2. Sobreescribimos el archivo físico con los nuevos binarios
         fs.writeFileSync(filePath, req.body);
         
-        // Opcional: Aquí podrías hacer un UPDATE a tu BD para cambiar la fecha de "ultima_modificacion"
+        // 3. ACTUALIZAMOS LA FECHA EN LA BASE DE DATOS
+        // Suponiendo que creaste una columna 'fecha_modificacion' 
+        await pool.query(
+            `UPDATE doc_carpetas 
+             SET fecha_modificacion = CURRENT_TIMESTAMP 
+             WHERE id = $1`, 
+            [fileId]
+        );
         
-        res.sendStatus(200); // Le decimos a Collabora: "OK, Guardado"
+        // 4. Le respondemos a Collabora que todo salió perfecto
+        res.sendStatus(200); 
+
     } catch (error) {
-        console.error('Error guardando archivo:', error);
+        console.error('Error guardando archivo desde WOPI:', error);
         res.status(500).send('Error guardando archivo');
     }
 });

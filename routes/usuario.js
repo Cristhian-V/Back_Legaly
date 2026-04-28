@@ -47,19 +47,33 @@ router.post('/register',async (req, res) => {
 
 
 // ==========================================
-// DATA USUARIOS
+// DATA USUARIOS (Protegida por Rol)
 // ==========================================
 router.get('/data', verifyToken, async (req, res) => {
     try {
-        console.log("pasa por aqui")
-        const userData = await pool.query(
-            `SELECT 
+        const usuarioId = req.user.userId;
+
+        // 1. Averiguar el rol exacto del usuario que hace la solicitud
+        const rolQuery = await pool.query(
+            `SELECT rol_id FROM usuarios WHERE id = $1`,
+            [usuarioId]
+        );
+
+        if (rolQuery.rows.length === 0) {
+            return res.status(404).json({ error: 'El usuario solicitante no existe.' });
+        }
+
+        const rolIdValue = rolQuery.rows[0].rol_id;
+
+        // 2. Construir la consulta base (sin WHERE todavía)
+        let query = `
+            SELECT 
                 u.id, 
                 u.nombre_usuario, 
                 u.nombre_completo, 
                 u.email, 
                 u.rol_id, 
-                r.nombre AS rol_nombre,      -- Nombre real del rol
+                r.nombre AS rol_nombre,
                 u.estado_id, 
                 u.telefono, 
                 u.biografia, 
@@ -69,12 +83,30 @@ router.get('/data', verifyToken, async (req, res) => {
                 g.nombre AS grado_academico
             FROM usuarios u
             INNER JOIN roles_usuario r ON u.rol_id = r.id
-            LEFT JOIN grados_academicos g ON u.grado_id = g.id `
-        ); 
+            LEFT JOIN grados_academicos g ON u.grado_id = g.id
+        `;
+        
+        let values = [];
+
+        // 3. Lógica de Negocio El filtro 
+        if (rolIdValue === 1) {
+            // Si es Rol 1 (Socio/Admin) -> Obtiene TODOS los registros (activos e inactivos)
+            query += ` ORDER BY u.nombre_completo ASC`; 
+            // values se queda vacío []
+        } else {
+            // Si es cualquier otro rol -> Obtiene SOLO su propio registro
+            query += ` WHERE u.id = $1`;
+            values = [usuarioId];
+        }
+
+        // 4. Ejecutar la consulta final
+        const userData = await pool.query(query, values); 
+        
         res.json({ user: userData.rows });
+
     } catch (error) {
         console.error('Error al obtener datos del usuario:', error);
-        res.status(500).json({ error: 'Error al obtener datos del usuario' });
+        res.status(500).json({ error: 'Error interno al obtener los datos de usuarios.' });
     }
 });
 
@@ -114,10 +146,10 @@ router.get('/data/:id', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA 2: MODIFICAR USUARIO 
+// RUTA 2: MODIFICAR USUARIO (Incluye Contraseña)
 // ==========================================
 // Usamos /:id para saber qué usuario específico vamos a modificar
-//para habilitar ususarios que hayan sido eliminados logicamente, puede abilitarlos nuevamente desde esta ruta actulizando sus datos.
+// para habilitar usuarios que hayan sido eliminados logicamente, puede habilitarlos nuevamente desde esta ruta actualizando sus datos.
 router.put('/mod/:id', verifyToken, async (req, res) => {
     try {
         const targetUserId = req.params.id;
@@ -129,18 +161,27 @@ router.put('/mod/:id', verifyToken, async (req, res) => {
             telefono, 
             biografia, 
             avatar_url, 
-            grado_id 
+            grado_id,
+            password // 1. Recibimos la contraseña
         } = req.body;
 
-        // 1. Validación de datos OBLIGATORIOS
-        if (!grado_id || !telefono) {
-            return res.status(400).json({ 
-                error: 'Los campos grado_id y telefono son obligatorios para la modificación.' 
-            });
+        // ============================================================
+        // 1. VALIDACIÓN ÚNICA: LA CONTRASEÑA
+        // ============================================================
+        let hashFinal = null; // Por defecto es null (para que COALESCE no cambie nada)
+
+        // Verificamos que no sea null, ni undefined, ni un string vacío "" o ''
+        if (password !== undefined && password !== null && password.trim() !== '') {            
+            // Si pasó la validación, la encriptamos
+        const salt = await bcrypt.genSalt(10);
+            hashFinal = await bcrypt.hash(password, salt);
         }
 
-        // 2. Consulta de actualización dinámica usando COALESCE
-        // COALESCE($1, nombre_ususario) significa: "Si $1 viene vacío/nulo, deja el valor que ya estaba en la columna"
+        // ============================================================
+        // 2. CONSULTA SQL CON COALESCE
+        // ============================================================
+        // Nota: Convertí 'telefono' y 'grado_id' a COALESCE también, 
+        // ya que quitamos su validación de "obligatorios".
         const updateQuery = `
             UPDATE usuarios 
             SET 
@@ -148,15 +189,16 @@ router.put('/mod/:id', verifyToken, async (req, res) => {
                 nombre_completo = COALESCE($2, nombre_completo),
                 email = COALESCE($3, email),
                 rol_id = COALESCE($4, rol_id),
-                telefono = $5, -- Este es obligatorio, lo actualizamos directamente
+                telefono = COALESCE($5, telefono), 
                 biografia = COALESCE($6, biografia),
                 avatar_url = COALESCE($7, avatar_url),
-                grado_id = $8,  -- Este es obligatorio, lo actualizamos directamente
+                grado_id = COALESCE($8, grado_id),
+                password_hash = COALESCE($9, password_hash), -- Si hashFinal es null, la BD mantiene la contraseña vieja
                 estado_id = 1 -- Siempre lo dejamos activo al modificar
-            WHERE id = $9
+            WHERE id = $10
             RETURNING id, nombre_usuario, nombre_completo, email, telefono, estado_id;
         `;
-
+        console.log(rol_usuario)
         const valores = [
             name_user, 
             nombre_completo, 
@@ -166,7 +208,8 @@ router.put('/mod/:id', verifyToken, async (req, res) => {
             biografia, 
             avatar_url, 
             grado_id, 
-            targetUserId 
+            hashFinal,    // $9: Será el Hash de bcrypt o simplemente NULL
+            targetUserId  // $10
         ];
 
         const resultado = await pool.query(updateQuery, valores);
@@ -183,7 +226,7 @@ router.put('/mod/:id', verifyToken, async (req, res) => {
 
     } catch (error) {
         console.error('Error al actualizar usuario:', error);
-        res.status(500).json({ error: 'Error al modificar los datos del usuario' });
+        res.status(500).json({ error: 'Error interno al modificar los datos del usuario' });
     }
 });
 
