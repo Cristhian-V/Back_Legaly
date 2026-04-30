@@ -87,6 +87,8 @@ router.post("/", verifyToken, async (req, res) => {
   const client = await pool.connect();
 
   try {
+    const usuarioId = req.user.userId;
+
     // 1. Extraemos los datos que envía el Frontend
     const {
       area_legal_id, // Obligatorio (Ej: "1-porp intlec", "2-D.Soc", "3-Litigio", etc.)
@@ -159,6 +161,10 @@ router.post("/", verifyToken, async (req, res) => {
       [expedienteId, casoIdGenerado],
     );
 
+    await client.query (
+      `INSERT INTO equipo_caso (caso_id, usuario_id) VALUES ($1, $2)`,
+      [casoIdGenerado, usuarioId]
+    )
 
     // REGISTRAR EN EL HISTORIAL DE AUDITORÍA
     await registrarHistorial(
@@ -167,6 +173,7 @@ router.post("/", verifyToken, async (req, res) => {
       "creacion", // Asegúrate de tener este código en tu catálogo
       "Creacion del Caso",
       " Asignación de número interno para la gestión administrativa del Expediente.",
+      client
     );
 
     // 7. CONFIRMAMOS LA TRANSACCIÓN (Guardamos todo de forma permanente)
@@ -856,7 +863,7 @@ router.put("/:id/cerrar", verifyToken, async (req, res) => {
       SET 
         estado_id = 3, 
         sub_estado = 'Cerrado', 
-        fecha_cierre = CURRENT_TIMESTAMP
+        fecha_cierre = CURRENT_TIMESTAMP,
         estado_revision_id = 7
       WHERE expediente_id = $1
       RETURNING caso_id, expediente_id, descripcion_corta;
@@ -872,7 +879,7 @@ router.put("/:id/cerrar", verifyToken, async (req, res) => {
     const casoCerrado = resultado.rows[0];
 
     // Registrar esta acción crítica en el historial del caso
-    
+
     await registrarHistorial(
       casoCerrado.caso_id,
       usuarioId,
@@ -880,7 +887,7 @@ router.put("/:id/cerrar", verifyToken, async (req, res) => {
       "Caso Finalizado",
       "El expediente ha sido cerrado oficialmente en el sistema."
     );
-    
+
 
     res.json({
       message: "Caso cerrado exitosamente.",

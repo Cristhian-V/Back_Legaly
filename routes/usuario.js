@@ -13,6 +13,7 @@ router.post('/register',async (req, res) => {
           email,          
           password,
           rol_usuario,
+          grado_id,
           estado_usuario = 1, // Valor por defecto si no se proporciona
           telefono= '',
           biografia = '',
@@ -34,8 +35,8 @@ router.post('/register',async (req, res) => {
         // 3. Guardar el usuario usando SQL
         // El $1 y $2 son parámetros seguros para evitar ataques de Inyección SQL
         const newUser = await pool.query(
-            'INSERT INTO usuarios (nombre_usuario, nombre_completo, email, password_hash, rol_id, estado_id, telefono, biografia, avatar_url, creado_en ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-            [name_user, nombre_completo, email, hashedPassword, rol_usuario, estado_usuario, telefono, biografia, avatar_url, creado_en]
+            'INSERT INTO usuarios (nombre_usuario, nombre_completo, email, password_hash, rol_id, estado_id, telefono, biografia, avatar_url, creado_en, grado_id ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+            [name_user, nombre_completo, email, hashedPassword, rol_usuario, estado_usuario, telefono, biografia, avatar_url, creado_en, grado_id]
         );
 
         res.status(201).json({ message: 'Usuario creado exitosamente', user: newUser.rows[0] });

@@ -9,8 +9,9 @@ const pool = require('../db'); // Asegúrate de que la ruta a tu bd sea correcta
  * @param {string} titulo - Título corto a mostrar
  * @param {string} descripcion - Detalle de lo que ocurrió
  */
-const registrarHistorial = async (casoId, usuarioId, codigoTipoHistorial, titulo, descripcion) => {
+const registrarHistorial = async (casoId, usuarioId, codigoTipoHistorial, titulo, descripcion, clientTx) => {
     try {
+        const db = clientTx || pool;
         // 1. Buscamos el ID del tipo de historial basándonos en el código ("carga_doc" -> 3)
         const tipoQuery = await pool.query(
             'SELECT id FROM tipos_historial_caso WHERE codigo = $1', 
@@ -22,10 +23,10 @@ const registrarHistorial = async (casoId, usuarioId, codigoTipoHistorial, titulo
             return; // Salimos sin romper el programa
         }
 
-        const tipoHistorialId = tipoQuery.rows[0].id;
+        const tipoHistorialId = tipoQuery.rows[0].id; 
 
         // 2. Guardamos el registro en el historial
-        await pool.query(`
+        await db.query(`
             INSERT INTO historial_caso (caso_id, tipo_historial_id, usuario_id, titulo, descripcion, fecha_hito)
             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
         `, [casoId, tipoHistorialId, usuarioId, titulo, descripcion]);

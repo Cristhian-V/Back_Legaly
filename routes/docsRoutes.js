@@ -97,8 +97,8 @@ router.post("/:id/crearDocumento", verifyToken, async (req, res) => {
     // Se envía una url temporal que luego se actualizará
     const insertQuery = `
             INSERT INTO documentos 
-            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, tipo_documento_id, pesoMB, fecha_modificacion) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            (caso_id, subido_por_id, nombre, url_archivo, fecha_subida, pesoMB, fecha_modificacion) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id;
         `;
 
@@ -108,7 +108,6 @@ router.post("/:id/crearDocumento", verifyToken, async (req, res) => {
       nombreInicial,
       "ruta_temporal", // Placeholder
       new Date(),
-      tipoDocumento,
       0, // Peso inicial aproximado de una plantilla vacía
       new Date(),
     ]);
@@ -172,7 +171,6 @@ router.get("/:id/documentacion", verifyToken, async (req, res) => {
             SELECT 
               d.id,
               d.nombre,
-              t.nombre AS tipo_Documento,
               d.fecha_subida,
               u.nombre_completo AS Responsable,
               d.pesoMB,
@@ -182,7 +180,6 @@ router.get("/:id/documentacion", verifyToken, async (req, res) => {
             FROM documentos d
             JOIN casos c ON c.caso_id = d.caso_id
             JOIN usuarios u ON u.id = d.subido_por_id
-            JOIN tipo_documento t ON t.id = d.tipo_documento_id
             WHERE c.expediente_id = $1 and d.estado_doc = true
             `;
 

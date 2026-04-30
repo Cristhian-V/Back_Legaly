@@ -17,6 +17,7 @@ const eventosCalendarioRoutes = require("./routes/EventosCalendarioRouter");
 const clientesRouter = require("./routes/clienteRoutes");
 const wopiRoutes = require("./routes/wopiRoutes");
 const docusueltosRoutes = require("./routes/docsueltosRoutes");
+const catalogosRoutes = require("./routes/catalogosRoutes")
 
 const app = express();
 
@@ -62,6 +63,7 @@ app.use("/api/eventos", eventosCalendarioRoutes);
 app.use("/api/cliente", clientesRouter);
 app.use("/wopi", wopiRoutes);
 app.use("/api/docsueltos", docusueltosRoutes);
+app.use("/api/catalogos", catalogosRoutes);
 
 // --- INICIAR SERVIDOR ---
 const PORT = process.env.PORT || 3000;
