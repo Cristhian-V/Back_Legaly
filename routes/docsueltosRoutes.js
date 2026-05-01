@@ -262,7 +262,10 @@ router.get("/carpetas/:id_carpeta", verifyToken, async (req, res) => {
 
     const documentos = await pool.query(
       `
-      SELECT * FROM carpetas c 
+      SELECT 
+	  	  *,
+	  	  TO_CHAR(fecha_modificacion, 'DD/MM/YYYY HH24:MI') AS fecha_mod_format
+	    FROM carpetas c 
         JOIN doc_carpetas dc ON dc.carpeta_id = c.id
         JOIN equipo_documentos e ON e.documento_id = dc.id
         WHERE e.usuario_id = $1 AND c.id = $2 AND dc.estado_doc = true
