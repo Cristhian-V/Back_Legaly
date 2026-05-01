@@ -733,6 +733,7 @@ router.get("/files/:fileId", async (req, res) => {
 
     if (docQuery.rows.length === 0)
       return res.status(404).send("Archivo no encontrado");
+
     const doc = docQuery.rows[0];
     const filePath = path.resolve(doc.ruta_archivo); // Ruta física en el servidor
     const stats = fs.statSync(filePath);
@@ -761,7 +762,7 @@ router.get("/files/:fileId/contents", async (req, res) => {
     if (docQuery.rows.length === 0)
       return res.status(404).send("Archivo no encontrado");
 
-    const filePath = path.resolve(docQuery.rows[0].url_archivo);
+    const filePath = path.resolve(docQuery.rows[0].ruta_archivo);
     res.sendFile(filePath);
   } catch (error) {
     res.status(500).send("Error enviando archivo");
