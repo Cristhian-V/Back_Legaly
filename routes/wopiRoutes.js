@@ -7,7 +7,6 @@ const pool = require("../db"); // Tu conexión a PostgreSQL
 // 1. CheckFileInfo: Collabora pide los metadatos del documento
 router.get("/files/:fileId", async (req, res) => {
   try {
-    console.log("esta mos aqui3333");
     const { fileId } = req.params;
     // Buscamos el documento en la base de datos
     const docQuery = await pool.query(
@@ -37,7 +36,6 @@ router.get("/files/:fileId", async (req, res) => {
 // 2. GetFile: Collabora descarga los binarios para mostrarlo
 router.get("/files/:fileId/contents", async (req, res) => {
   try {
-    console.log("esta mos aqui 222");
     const { fileId } = req.params;
     const docQuery = await pool.query(
       "SELECT url_archivo FROM documentos WHERE id = $1",
@@ -60,6 +58,7 @@ router.post(
   async (req, res) => {
     try {
       const { fileId } = req.params;
+
       const docQuery = await pool.query(
         "SELECT url_archivo FROM documentos WHERE id = $1",
         [fileId],
@@ -71,7 +70,6 @@ router.post(
 
       // Sobreescribimos el archivo físico con los nuevos binarios que manda Collabora
       fs.writeFileSync(filePath, req.body);
-      console.log("esta mos aqui");
       // Opcional: Aquí podrías hacer un UPDATE a tu BD para cambiar la fecha de "ultima_modificacion"
       await pool.query(
         `UPDATE documentos 
