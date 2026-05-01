@@ -73,9 +73,9 @@ router.post(
       // Opcional: Aquí podrías hacer un UPDATE a tu BD para cambiar la fecha de "ultima_modificacion"
       await pool.query(
         `UPDATE documentos 
-             SET fecha_modificacion = CURRENT_TIMESTAMP 
-             WHERE id = $1`,
-        [fileId],
+             SET fecha_modificacion = $1 
+             WHERE id = $2`,
+        [new Date(), fileId],
       );
 
       res.sendStatus(200); // Le decimos a Collabora: "OK, Guardado"

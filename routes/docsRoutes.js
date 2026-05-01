@@ -175,7 +175,7 @@ router.get("/:id/documentacion", verifyToken, async (req, res) => {
               u.nombre_completo AS Responsable,
               d.pesoMB,
               d.url_archivo,
-              TO_CHAR(d.fecha_modificacion, 'DD/MM/YYYY hh:mm:ss') AS fecha_modificacion,
+              TO_CHAR(d.fecha_modificacion, 'DD/MM/YYYY HH24:MI:SS') AS fecha_modificacion,
               d.solicitud_revision
             FROM documentos d
             JOIN casos c ON c.caso_id = d.caso_id

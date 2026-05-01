@@ -264,7 +264,7 @@ router.get("/carpetas/:id_carpeta", verifyToken, async (req, res) => {
       `
       SELECT 
 	  	  *,
-	  	  TO_CHAR(fecha_modificacion, 'DD/MM/YYYY HH24:MI') AS fecha_mod_format
+	  	  TO_CHAR(fecha_modificacion, 'DD/MM/YYYY HH24:MI:SS') AS fecha_mod_format
 	    FROM carpetas c 
         JOIN doc_carpetas dc ON dc.carpeta_id = c.id
         JOIN equipo_documentos e ON e.documento_id = dc.id
@@ -329,7 +329,7 @@ router.post("/carpetas/:carpeta_id/documentos", verifyToken, (req, res) => {
         const insertQuery = `
             INSERT INTO doc_carpetas 
             (carpeta_id, nombre, ruta_archivo, subido_por_id, peso_mb, fecha_modificacion) 
-            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id;
         `;
 
@@ -339,6 +339,7 @@ router.post("/carpetas/:carpeta_id/documentos", verifyToken, (req, res) => {
           req.file.path, // Ruta temporal
           usuario_id,
           Math.trunc(req.file.size / (1024 * 1024)),
+          new Date(),
         ]);
 
         const nuevoId = nuevaDocumentacion.rows[0].id;
@@ -635,7 +636,7 @@ router.post(
       const insertQuery = `
             INSERT INTO doc_carpetas 
             (carpeta_id, nombre, ruta_archivo, subido_por_id, peso_mb, fecha_modificacion) 
-            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id;
         `;
       const nuevaDocumentacion = await client.query(insertQuery, [
@@ -644,6 +645,7 @@ router.post(
         "ruta_temporal", // Placeholder
         usuario_id,
         0, // Peso inicial de una plantilla vacía
+        new Date(),
       ]);
 
       const nuevoId = nuevaDocumentacion.rows[0].id;
@@ -798,9 +800,9 @@ router.post(
       // Suponiendo que creaste una columna 'fecha_modificacion'
       await pool.query(
         `UPDATE doc_carpetas 
-             SET fecha_modificacion = CURRENT_TIMESTAMP 
-             WHERE id = $1`,
-        [fileId],
+             SET fecha_modificacion = $1
+             WHERE id = $2`,
+        [new Date(), fileId],
       );
 
       // 4. Le respondemos a Collabora que todo salió perfecto
