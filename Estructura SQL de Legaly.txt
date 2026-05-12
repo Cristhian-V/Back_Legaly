@@ -1,0 +1,114 @@
+1. 🗂️ Dominios de Catálogos (Tablas de Referencia)
+Estas tablas almacenan valores estáticos y configuraciones del sistema. Un agente debe usarlas para consultas de tipos o estados (Ej. ¿Cuáles son los estados de un caso?).
+
+
+area_legal: Áreas de práctica legal (id, nombre, codigo).  
+
+
+categorias_cliente: Clasificación de los clientes (id, nombre, activo).  
+
+
+estado_revision: Fases de la revisión de documentos (id, descripcion).  
+
+
+estados_caso: Estados operativos de los casos legales (id, nombre).  
+
+
+estados_usuario: Activo / Inactivo (id, nombre).  
+
+
+grados_academicos: Títulos de los usuarios (Abogado, Licenciado, etc.) (id, titulo, nombre, activo).  
+
+
+roles_usuario: Permisos y roles en el sistema (id, nombre, activo).  
+
+
+tipo_documento: Clasificación de los documentos subidos (id, nombre).  
+
+
+tipos_evento_cal: Tipos de eventos en el calendario (Audiencia, reunión, etc.) (id, nombre, activo).  
+
+
+tipos_historial_caso: Códigos de hitos que ocurren en un caso (id, codigo, nombre).  
+
+
+roles_interaccion_ia: Roles en el chat (Ej. Usuario, Modelo) (id, nombre).  
+
+2. 👤 Dominio de Usuarios y Clientes (Entidades Principales)
+Almacena a los actores principales del sistema.
+
+
+usuarios: Personal del despacho o sistema.  
+
+Columnas Clave: id (PK), grado_id (FK), rol_id (FK), estado_id (FK), nombre_completo, email, password_hash, telefono.
+
+
+clientes: Entidades o personas que contratan los servicios.  
+
+Columnas Clave: id (PK), categoria_id (FK), nombre_completo, documento_identidad, correo_electronico, estado.
+
+
+contactos_cliente: Personas de contacto específicas dentro de la empresa/entidad de un cliente.  
+
+Columnas Clave: id (PK), cliente_id (FK), nombre_contacto, cargo, es_principal.
+
+3. ⚖️ Dominio de Casos (Core Business)
+Gestiona el ciclo de vida y la información de los expedientes legales.
+
+
+casos: El expediente legal central.  
+
+Columnas Clave: caso_id (PK), expediente_id (Identificador único), cliente_id (FK), responsable_id (FK a Usuarios), area_legal_id (FK), estado_id (FK), descripcion_corta, progreso_porcentaje (0-100).
+
+
+equipo_caso: Tabla pivote que asocia a múltiples abogados/usuarios con un caso.  
+
+Columnas Clave: caso_id (FK), usuario_id (FK).
+
+
+contactos_caso: Vincula contactos específicos del cliente con un caso particular.  
+
+Columnas Clave: id (PK), caso_id (FK), contacto_id (FK).
+
+4. 📁 Dominio de Documentos y Archivos
+Gestión de almacenamiento, versiones y revisión documental.
+
+
+carpetas: Estructura lógica de directorios. (id, nombre_carpeta, ruta)  
+
+
+doc_carpetas: Archivos almacenados dentro de la estructura de carpetas de los casos. (id, carpeta_id, ruta_archivo, caso_id, subido_por_id)  
+
+
+documentos: Entidad para la gestión documental detallada de cada caso. (id, nombre, url_archivo, tipo_documento_id, caso_id, subido_por_id, estado_doc)  
+
+
+equipo_documentos: Usuarios asignados o con acceso a un documento particular. (id, documento_id, usuario_id)  
+
+
+control_versiones: Registra las iteraciones y cambios de un documento. (id, modificado_por_id, documento_id, version_doc, doc_url, comentarios_cambio)  
+
+
+revisiones_caso: Solicitudes formales de revisión y feedback para elementos de un caso. (id, caso_id, solicitante_id, revisor_id, estado_revision_id, comentarios)  
+
+5. 📅 Dominio de Agenda y Eventos (Calendario)
+Control de tiempos, reuniones y plazos legales.
+
+
+eventos_calendario: Hitos y tareas vinculadas estrictamente a un caso. (id, caso_id, titulo, fecha_hora, tipo_evento_id)  
+
+
+eventos_usuarios: Eventos personales o del equipo, no necesariamente atados a un caso. (id, titulo, fecha_hora, tipo_evento_id, creado_por_id)  
+
+
+participantes_evento: Pivote de asistentes a eventos. (evento_id, usuario_id)  
+
+
+historial_caso: Registro de auditoría (logs) de todas las acciones que ocurren dentro de un expediente legal. (id, caso_id, tipo_historial_id, usuario_id, titulo, descripcion)  
+
+6. 🤖 Dominio IA y Misceláneos
+
+interacciones_ia: Registra el historial de chat o prompts generados entre un usuario y el modelo (agente). (id, usuario_id, rol_mensaje_id, contenido)  
+
+
+usuarios_area: Tabla pivote para establecer a qué Área Legal (Ej. Litigios, Propiedad Intelectual) pertenece cada usuario/abogado. (id, usuario_id, area_legal_id)

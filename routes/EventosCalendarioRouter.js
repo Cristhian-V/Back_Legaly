@@ -4,7 +4,7 @@ const pool = require("../db");
 const verifyToken = require("../middlewares/verifyToken");
 const { registrarHistorial } = require("../utils/historialHelper");
 
-// Obtener eventos del calendario global
+// Obtener eventos del calendario global (casos + usuarios)
 router.get("/", verifyToken, async (req, res) => {
   try {
     const usuarioId = req.user.userId;
@@ -19,39 +19,55 @@ router.get("/", verifyToken, async (req, res) => {
     let query = "";
     let values = [];
 
-    // Si es un Abogado Socio / Admin (Rol 1) -> Ve TODOS los eventos
+    // Rol 1 (Admin) -> Ve TODOS los eventos de casos y de usuarios
     if (rolIdValue === 1) {
       query = `
-        SELECT c.expediente_id,
-               eCal.id AS evento_id, 
-               eCal.titulo, 
-               eCal.descripcion, 
-               eCal.fecha_hora, 
-               te.nombre AS tipo_evento
+        SELECT 'caso' AS origen, c.expediente_id, eCal.id AS evento_id,
+               eCal.titulo, eCal.descripcion, eCal.fecha_hora,
+               te.nombre AS tipo_evento, NULL AS creado_por
         FROM casos c
         JOIN eventos_calendario eCal ON eCal.caso_id = c.caso_id
         JOIN tipos_evento_cal te ON te.id = eCal.tipo_evento_id
-        ORDER BY eCal.fecha_hora ASC
+
+        UNION ALL
+
+        SELECT 'usuario' AS origen, NULL AS expediente_id, eu.id AS evento_id,
+               eu.titulo, eu.descripcion, eu.fecha_hora,
+               te.nombre AS tipo_evento, u.nombre_completo AS creado_por
+        FROM eventos_usuarios eu
+        JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
+        JOIN usuarios u ON u.id = eu.creado_por_id
+
+        ORDER BY fecha_hora ASC
       `;
-      values = []; // No filtramos por usuario_id
+      values = [];
     }
-    // Si es cualquier otro rol -> Ve SOLO los eventos de los casos donde es parte del equipo
+    // Otros roles -> Eventos de casos (equipo + area_legal) + eventos de usuario propios
     else {
       query = `
-        SELECT c.expediente_id,
-               eCal.id AS evento_id, 
-               eCal.titulo, 
-               eCal.descripcion, 
-               eCal.fecha_hora, 
-               te.nombre AS tipo_evento
+        SELECT 'caso' AS origen, c.expediente_id, eCal.id AS evento_id,
+               eCal.titulo, eCal.descripcion, eCal.fecha_hora,
+               te.nombre AS tipo_evento, NULL AS creado_por
         FROM casos c
-        JOIN equipo_caso e ON c.caso_id = e.caso_id
         JOIN eventos_calendario eCal ON eCal.caso_id = c.caso_id
         JOIN tipos_evento_cal te ON te.id = eCal.tipo_evento_id
-        WHERE e.usuario_id = $1
-        ORDER BY eCal.fecha_hora ASC
+        WHERE c.caso_id IN (SELECT caso_id FROM equipo_caso WHERE usuario_id = $1)
+           OR c.area_legal_id IN (SELECT area_legal_id FROM usuarios_area WHERE usuario_id = $1)
+
+        UNION ALL
+
+        SELECT 'usuario' AS origen, NULL AS expediente_id, eu.id AS evento_id,
+               eu.titulo, eu.descripcion, eu.fecha_hora,
+               te.nombre AS tipo_evento, u.nombre_completo AS creado_por
+        FROM eventos_usuarios eu
+        JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
+        JOIN usuarios u ON u.id = eu.creado_por_id
+        WHERE eu.creado_por_id = $1
+           OR eu.id IN (SELECT evento_id FROM participantes_evento WHERE usuario_id = $1)
+
+        ORDER BY fecha_hora ASC
       `;
-      values = [usuarioId]; // Filtramos por su ID
+      values = [usuarioId];
     }
 
     const eventos = await pool.query(query, values);
@@ -213,6 +229,162 @@ router.delete("/:id", verifyToken, async (req, res) => {
   } catch (error) {
     console.error("Error al eliminar evento en el calendario:", error);
     res.status(500).json({ error: "Error interno al eliminar el evento." });
+  }
+});
+
+// ==========================================
+// OBTENER SOLO EVENTOS DE USUARIO (GET /usuario)
+// ==========================================
+router.get("/usuario", verifyToken, async (req, res) => {
+  try {
+    const usuarioId = req.user.userId;
+    const rolId = await pool.query(
+      `SELECT rol_id FROM usuarios WHERE id = $1`,
+      [usuarioId],
+    );
+    const rolIdValue = rolId.rows[0].rol_id;
+
+    let query = "";
+    let values = [];
+
+    if (rolIdValue === 1) {
+      query = `
+        SELECT eu.id AS evento_id, eu.titulo, eu.descripcion, eu.fecha_hora,
+               te.nombre AS tipo_evento, u.nombre_completo AS creado_por,
+               eu.creado_por_id
+        FROM eventos_usuarios eu
+        JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
+        JOIN usuarios u ON u.id = eu.creado_por_id
+        ORDER BY eu.fecha_hora ASC
+      `;
+      values = [];
+    } else {
+      query = `
+        SELECT eu.id AS evento_id, eu.titulo, eu.descripcion, eu.fecha_hora,
+               te.nombre AS tipo_evento, u.nombre_completo AS creado_por,
+               eu.creado_por_id
+        FROM eventos_usuarios eu
+        JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
+        JOIN usuarios u ON u.id = eu.creado_por_id
+        WHERE eu.creado_por_id = $1
+           OR eu.id IN (SELECT evento_id FROM participantes_evento WHERE usuario_id = $1)
+        ORDER BY eu.fecha_hora ASC
+      `;
+      values = [usuarioId];
+    }
+
+    const eventos = await pool.query(query, values);
+    res.json(eventos.rows);
+  } catch (error) {
+    console.error("Error al obtener eventos de usuario:", error);
+    res.status(500).json({ error: "Error interno al obtener los eventos de usuario." });
+  }
+});
+
+// ==========================================
+// CREAR EVENTO DE USUARIO (POST /usuario)
+// ==========================================
+router.post("/usuario", verifyToken, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const usuarioId = req.user.userId;
+    const { titulo, descripcion, fecha_hora, tipo_evento_id, participantes_ids } = req.body;
+
+    if (!titulo || !fecha_hora || !tipo_evento_id) {
+      return res.status(400).json({ error: "titulo, fecha_hora y tipo_evento_id son obligatorios." });
+    }
+
+    await client.query("BEGIN");
+
+    const nuevoEvento = await client.query(
+      `INSERT INTO eventos_usuarios (titulo, descripcion, fecha_hora, tipo_evento_id, creado_por_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [titulo, descripcion || null, fecha_hora, tipo_evento_id, usuarioId],
+    );
+
+    const eventoId = nuevoEvento.rows[0].id;
+
+    // Insertar al creador como participante
+    await client.query(
+      `INSERT INTO participantes_evento (evento_id, usuario_id) VALUES ($1, $2)`,
+      [eventoId, usuarioId],
+    );
+
+    // Insertar participantes adicionales si se enviaron
+    if (participantes_ids && Array.isArray(participantes_ids) && participantes_ids.length > 0) {
+      for (const participanteId of participantes_ids) {
+        await client.query(
+          `INSERT INTO participantes_evento (evento_id, usuario_id) 
+           VALUES ($1, $2) 
+           ON CONFLICT (evento_id, usuario_id) DO NOTHING`,
+          [eventoId, participanteId],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      message: "Evento de usuario creado exitosamente.",
+      evento_id: eventoId,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error al crear evento de usuario:", error);
+    res.status(500).json({ error: "Error interno al crear el evento de usuario." });
+  } finally {
+    client.release();
+  }
+});
+
+// ==========================================
+// ELIMINAR EVENTO DE USUARIO (DELETE /usuario/:id)
+// ==========================================
+router.delete("/usuario/:id", verifyToken, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const eventoId = req.params.id;
+    const usuarioId = req.user.userId;
+
+    // Verificar que el evento existe y que el usuario es el creador
+    const evento = await client.query(
+      `SELECT id, titulo, creado_por_id FROM eventos_usuarios WHERE id = $1`,
+      [eventoId],
+    );
+
+    if (evento.rows.length === 0) {
+      client.release();
+      return res.status(404).json({ error: "El evento no existe." });
+    }
+
+    if (evento.rows[0].creado_por_id !== usuarioId) {
+      client.release();
+      return res.status(403).json({ error: "Solo el creador del evento puede eliminarlo." });
+    }
+
+    await client.query("BEGIN");
+
+    await client.query(
+      `DELETE FROM participantes_evento WHERE evento_id = $1`,
+      [eventoId],
+    );
+
+    await client.query(
+      `DELETE FROM eventos_usuarios WHERE id = $1`,
+      [eventoId],
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Evento de usuario eliminado exitosamente." });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error al eliminar evento de usuario:", error);
+    res.status(500).json({ error: "Error interno al eliminar el evento de usuario." });
+  } finally {
+    client.release();
   }
 });
 

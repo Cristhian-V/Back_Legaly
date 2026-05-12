@@ -19,7 +19,7 @@ router.get('/', verifyToken, async (req, res) => {
         const categoriasClienteQuery = pool.query(`SELECT id, nombre FROM categorias_cliente ORDER BY id ASC`);
         const estadosCasoQuery = pool.query(`SELECT id, nombre FROM estados_caso ORDER BY id ASC`);
         const areaLegalQuery = pool.query(`SELECT id, nombre FROM area_legal ORDER BY nombre ASC`);
-        const tiposEventoQuery = pool.query(`SELECT id, nombre FROM tipos_evento_cal ORDER BY id ASC`);
+        const tiposEventoQuery = pool.query(`SELECT * FROM tipos_evento_cal ORDER BY id ASC`);
         const tiposDocumentoQuery = pool.query(`SELECT id, nombre FROM tipo_documento ORDER BY id ASC`);
 
         // 2. Ejecutamos TODAS las consultas AL MISMO TIEMPO con Promise.all

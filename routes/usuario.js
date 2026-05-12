@@ -265,4 +265,100 @@ router.delete('/delete/:id', verifyToken, async (req, res) => {
 });
 
 
+// ==========================================
+// RUTA: OBTENER USUARIOS CON ÁREAS LEGALES ASIGNADAS (GET /area)
+// ==========================================
+router.get('/area', verifyToken, async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                u.id,
+                u.nombre_completo,
+                u.email,
+                u.avatar_url,
+                u.estado_id,
+                r.nombre AS rol,
+                json_agg(json_build_object(
+                    'id', al.id,
+                    'nombre', al.nombre,
+                    'codigo', al.codigo
+                )) AS areas_legales
+            FROM usuarios u
+            JOIN usuarios_area ua ON ua.usuario_id = u.id
+            JOIN area_legal al ON al.id = ua.area_legal_id
+            JOIN roles_usuario r ON r.id = u.rol_id
+            WHERE u.estado_id = 1
+            GROUP BY u.id, u.nombre_completo, u.email, u.avatar_url, u.estado_id, r.nombre
+            ORDER BY u.nombre_completo ASC
+        `;
+
+        const resultado = await pool.query(query);
+        res.json(resultado.rows);
+    } catch (error) {
+        console.error('Error al obtener usuarios con áreas legales:', error);
+        res.status(500).json({ error: 'Error interno al obtener los usuarios con áreas asignadas.' });
+    }
+});
+
+// ==========================================
+// RUTA: ASIGNAR USUARIO A ÁREAS LEGALES (POST /area)
+// ==========================================
+router.post('/area', verifyToken, async (req, res) => {
+    try {
+        const { usuario_id, areas_legales_ids } = req.body;
+
+        if (!usuario_id || !areas_legales_ids || !Array.isArray(areas_legales_ids) || areas_legales_ids.length === 0) {
+            return res.status(400).json({ error: 'Debe enviar un usuario_id y un arreglo areas_legales_ids válido.' });
+        }
+
+        let asignadas = 0;
+        for (const area_id of areas_legales_ids) {
+            const resultado = await pool.query(
+                `INSERT INTO usuarios_area (usuario_id, area_legal_id) 
+                 VALUES ($1, $2) 
+                 ON CONFLICT (usuario_id, area_legal_id) DO NOTHING
+                 RETURNING id`,
+                [usuario_id, area_id]
+            );
+            if (resultado.rows.length > 0) asignadas++;
+        }
+
+        res.status(201).json({
+            message: `Se asignaron ${asignadas} área(s) legal(es) al usuario.`,
+            total_enviadas: areas_legales_ids.length,
+            asignadas
+        });
+    } catch (error) {
+        console.error('Error al asignar usuario a área legal:', error);
+        res.status(500).json({ error: 'Error interno al asignar áreas legales al usuario.' });
+    }
+});
+
+// ==========================================
+// RUTA: QUITAR USUARIO DE UN ÁREA LEGAL (DELETE /area)
+// ==========================================
+router.delete('/area', verifyToken, async (req, res) => {
+    try {
+        const { usuario_id, area_legal_id } = req.body;
+
+        if (!usuario_id || !area_legal_id) {
+            return res.status(400).json({ error: 'Debe enviar usuario_id y area_legal_id.' });
+        }
+
+        const resultado = await pool.query(
+            `DELETE FROM usuarios_area WHERE usuario_id = $1 AND area_legal_id = $2 RETURNING id`,
+            [usuario_id, area_legal_id]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ error: 'El usuario no pertenece a esa área legal.' });
+        }
+
+        res.json({ message: 'Usuario removido del área legal exitosamente.' });
+    } catch (error) {
+        console.error('Error al quitar usuario de área legal:', error);
+        res.status(500).json({ error: 'Error interno al remover el usuario del área legal.' });
+    }
+});
+
 module.exports = router;

@@ -1,24 +1,33 @@
+RESULUCION PANTALLAS	
+Ajustar resoluciones, para celulares y tablets.(listo)
 
-Tono de azules de login y navbar que se amas claro.
+CREACION DE USUSARIOS
+que pertenezcan a una o varias area legal al momento de crearlos y que todos los casos de esa area legal sean visibles area el usuario. (listo)
 
-DOCUMENTOS
-caratula genrar automaticamanete. (PENDIENTE DE QUE ME PASEN EL DOCUMENTO.)
-quitar la parte de tipos de documento (LISTO)
-generar documento desde la plataforma todo officce (LISTO)
-editar desde la plataforma los dcocuemtnos office (LISTO)
-poner ultima fecha de modificacion. (LISTO)
-quitar subido por. (LISTO)
-quitar eliminacion de docuemntos. (LISTO)
+EXPEDIENTES 
+1. Cambiar el nombre de caso cerrado a casos pasivos (listo)
+2. en pestaña general vencimiento que sea fecha de cierre (listo)
+
+DOCUMENTOS.
+quitar la opción de modificar. (listo)
+cambiar abrir editor, a Editar. (listo)
+
+TIEMPO SE SESSION 
+2 horas 
+
+INICIO 
+Adicionar un botón donde se pueda crear un evento para el usuario propietario o varios, que se seccione en un cuadro. (listo)
+2. achicar los cuadros del calendario para que entren cuatro registros. (listo)
+
+CONFIGURACIONES
+quitar grado académico de todo. (listo)
+2. poner un nuevo tipo de dato que sea color. (listo)
 
 
-CREACION DE EXPEDIENTE.
-seelccionar a los contactos de clientes cuando se cree el caso. (LISTO)
-añadir cuadro de seleccion para abogados colaboradores (LISTO)
-todos los campos sean obligatorior. (LISTO)
+GENERAL
+el tamaño de las fuentes están muy chicas, ver un mejor tamaño  (listo)
+achicar las tarjetas de casos activos y demás. (listo)
+AL SUBIR ALGUN DOCUMENTO QUE SE BLOQUEE EL BOTON HASTA QUE TERMINE DE SUBIR EL ARCHIVO
 
 
-GENERAL 
-Quitar pa seccion de revisiones.
-
-EQUIPO
-cambiar la forma de visualizacion a filas.(LISTO)
+ACCESOS A LA RED POR VPN EN SERVIDOR PRIVADO.
