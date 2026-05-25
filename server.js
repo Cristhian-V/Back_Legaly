@@ -24,6 +24,11 @@ const app = express();
 app.use(express.json()); // Middleware para parsear JSON
 
 // --- MEDIDAS DE SEGURIDAD GLOBALES ---
+const allowedOrigins = [
+  process.env.CORS_ORIGIN || 'https://legaly.local',
+  'https://office.legaly.local',
+  'https://api.legaly.local'   // por si acaso
+];
 
 // 1. Helmet: Oculta información sensible en los encabezados HTTP
 // Ajustamos las políticas para que permita la comunicación cruzada (CORS)
@@ -37,8 +42,15 @@ app.use(
 // 2. CORS: Define qué dominios (front-end) pueden hablar con tu servidor
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || 'https://legaly.local', // Respaldo local directo
-    credentials: true, // Permite enviar cookies y tokens
+    origin: function (origin, callback) {
+      // Permitir peticiones sin origen (como las de servidor a servidor)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   })
