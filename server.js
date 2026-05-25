@@ -44,8 +44,6 @@ app.use(
   })
 );
 
-// Habilitar de forma explícita las respuestas automáticas a peticiones de tipo OPTIONS (Preflight)
-app.options('*', cors());
 
 // 3. Rate Limiting: Evita ataques de fuerza bruta al login
 const loginLimiter = rateLimit({
