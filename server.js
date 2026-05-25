@@ -26,15 +26,26 @@ app.use(express.json()); // Middleware para parsear JSON
 // --- MEDIDAS DE SEGURIDAD GLOBALES ---
 
 // 1. Helmet: Oculta información sensible en los encabezados HTTP
-app.use(helmet());
+// Ajustamos las políticas para que permita la comunicación cruzada (CORS)
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "unsafe-none" },
+  })
+);
 
 // 2. CORS: Define qué dominios (front-end) pueden hablar con tu servidor
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN, // Cambia esto por la URL de tu front-end
-    credentials: true, // Permite enviar cookies
-  }),
+    origin: process.env.CORS_ORIGIN || 'https://legaly.local', // Respaldo local directo
+    credentials: true, // Permite enviar cookies y tokens
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  })
 );
+
+// Habilitar de forma explícita las respuestas automáticas a peticiones de tipo OPTIONS (Preflight)
+app.options('*', cors());
 
 // 3. Rate Limiting: Evita ataques de fuerza bruta al login
 const loginLimiter = rateLimit({
