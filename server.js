@@ -18,6 +18,7 @@ const clientesRouter = require("./routes/clienteRoutes");
 const wopiRoutes = require("./routes/wopiRoutes");
 const docusueltosRoutes = require("./routes/docsueltosRoutes");
 const catalogosRoutes = require("./routes/catalogosRoutes");
+const citesRoutes = require("./routes/citesRoutes");
 
 const app = express();
 
@@ -87,6 +88,7 @@ app.use("/api/cliente", clientesRouter);
 app.use("/api/wopi", wopiRoutes);
 app.use("/api/docsueltos", docusueltosRoutes);
 app.use("/api/catalogos", catalogosRoutes);
+app.use("/api/cites", citesRoutes);
 
 // --- INICIAR SERVIDOR ---
 const PORT = process.env.PORT || 3000;

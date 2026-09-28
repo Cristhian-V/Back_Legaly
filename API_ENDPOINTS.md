@@ -8,6 +8,23 @@ Base URL: `http://localhost:3000` (configurable via `PORT` en `.env`)
 
 ---
 
+## Control de acceso a expedientes
+
+Regla: un usuario con rol **1 (Admin/Socio)** ve todo. Cualquier otro usuario solo puede ver e interactuar con un expediente si es su **responsable** (`responsable_id`) o pertenece a su **equipo** (`equipo_caso`). El **área legal ya no otorga acceso**.
+
+Los endpoints ligados a un expediente validan esta regla en el servidor y responden:
+
+- `403` si el usuario no tiene acceso al expediente.
+- `404` si el expediente (o el recurso hijo: documento, revisión, evento) no existe.
+
+Endpoints cubiertos: detalle, edición, cierre, historial, revisiones, equipo y contactos de `/api/casos`; documentación de `/api/docs`; y los eventos de caso de `/api/eventos`. El listado de casos, el calendario y el dashboard usan la misma regla.
+
+Al crear un caso, el **responsable y el creador** se agregan automáticamente al equipo.
+
+**Limitacion conocida:** las rutas `/wopi/*` y `/api/docs/descargar` son publicas por diseño del editor Collabora y **no** estan cubiertas por este control de acceso.
+
+---
+
 ## `/api/auth` — Autenticacion
 
 ### `POST /api/auth/login`
@@ -405,10 +422,10 @@ Respuesta: `{ message }`
 
 ### `GET /api/eventos`
 Todos los eventos (calendario de casos + eventos de usuario). **Rol 1 ve todo. Otros ven:**
-- Eventos de casos donde estan en `equipo_caso` o comparten `area_legal`
+- Eventos de casos donde son `responsable` o estan en `equipo_caso`. El **área legal no otorga visibilidad**.
 - Eventos de usuario donde son creador o participante
 
-Respuesta: `[{ origen: "caso"|"usuario", expediente_id, evento_id, titulo, descripcion, fecha_hora, tipo_evento, creado_por }]`
+Respuesta: `[{ origen: "caso"|"usuario", expediente_id, evento_id, titulo, descripcion, fecha_hora, tipo_evento, modalidad, creado_por }]`
 
 ---
 
@@ -419,12 +436,12 @@ Solo eventos de un caso especifico.
 |---|---|
 | `caso_id` | string (expediente_id) |
 
-Respuesta: `[{ expediente_id, evento_id, titulo, descripcion, fecha_hora, tipo_evento }]`
+Respuesta: `[{ expediente_id, evento_id, titulo, descripcion, fecha_hora, tipo_evento, modalidad }]`
 
 ---
 
 ### `POST /api/eventos`
-Crea evento vinculado a un caso.
+Crea evento vinculado a un caso. Todo el equipo del caso se agrega automaticamente como participante (estado `pendiente`).
 
 | Body | Tipo | Requerido |
 |---|---|---|
@@ -432,6 +449,7 @@ Crea evento vinculado a un caso.
 | `fecha_hora` | datetime | Si |
 | `tipo_evento_id` | number | Si |
 | `caso_id` | string | Si (expediente_id) |
+| `modalidad` | string | Si (`"virtual"` o `"presencial"`) |
 | `descripcion` | string | No |
 
 Respuesta: `{ message, evento: number }`
@@ -451,6 +469,7 @@ Modifica evento de caso.
 | `descripcion` | string | No |
 | `fecha_hora` | datetime | No |
 | `tipo_evento_id` | number | No |
+| `modalidad` | string | No (`"virtual"` o `"presencial"`) |
 
 Respuesta: `{ message, evento: {...} }`
 
@@ -470,18 +489,19 @@ Respuesta: `{ message }`
 ### `GET /api/eventos/usuario`
 Solo eventos de usuario (personales/de equipo). **Rol 1 ve todos; otros ven los propios.**
 
-Respuesta: `[{ evento_id, titulo, descripcion, fecha_hora, tipo_evento, creado_por, creado_por_id }]`
+Respuesta: `[{ evento_id, titulo, descripcion, fecha_hora, tipo_evento, modalidad, creado_por, creado_por_id }]`
 
 ---
 
 ### `POST /api/eventos/usuario`
-Crea evento de usuario. El creador se agrega automaticamente como participante.
+Crea evento de usuario. El creador y los integrantes seleccionados se agregan automaticamente como participantes (estado `pendiente`).
 
 | Body | Tipo | Requerido | Default |
 |---|---|---|---|
 | `titulo` | string | Si | — |
 | `fecha_hora` | datetime | Si | — |
 | `tipo_evento_id` | number | Si | — |
+| `modalidad` | string | Si | — |
 | `descripcion` | string | No | null |
 | `participantes_ids` | number[] | No | [] |
 
@@ -497,6 +517,36 @@ Elimina evento de usuario. **Solo el creador puede eliminarlo** (403 si no).
 | `id` | number |
 
 Respuesta: `{ message }`
+
+---
+
+### `GET /api/eventos/participantes?tipo_evento=..&evento_id=..`
+Participantes de un evento con su estado de asistencia.
+
+| Query | Tipo | Requerido |
+|---|---|---|
+| `tipo_evento` | string | Si (`"caso"` o `"usuario"`) |
+| `evento_id` | number | Si |
+
+Respuesta: `{ participantes: [{ usuario_id, estado_asistencia, comentario, respondido_en, nombre_completo, avatar_url }] }`
+
+Estados: `pendiente` (default), `confirmado`, `no_asiste`.
+
+---
+
+### `PUT /api/eventos/asistencia`
+Registra la asistencia del **propio usuario** a un evento. El comentario es obligatorio solo cuando `estado_asistencia = "no_asiste"`.
+
+| Body | Tipo | Requerido |
+|---|---|---|
+| `tipo_evento` | string | Si (`"caso"` o `"usuario"`) |
+| `evento_id` | number | Si |
+| `estado_asistencia` | string | Si (`"confirmado"` o `"no_asiste"`) |
+| `comentario` | string | Si cuando `no_asiste` |
+
+Respuesta: `{ message, participante: { usuario_id, estado_asistencia, comentario, respondido_en } }`
+
+Errores: `400` si falta el comentario al no asistir, `403` si el usuario no es participante.
 
 ---
 
@@ -844,20 +894,89 @@ Catalogo disponibles: `tipos-evento`, `roles`, `grados`, `categorias-cliente`, `
 
 Para `tipos-evento`, los campos validos son: `nombre` (string), `activo` (boolean), `color` (string, ej. `"#FF5733"`).
 
+**Autoría y permisos de `tipos-evento`:** cualquier usuario autenticado puede crear tipos. El servidor registra como autor al usuario de la sesión (el `creado_por_id` que envíe el cliente se ignora). Editar, desactivar o reactivar un tipo solo lo puede hacer su **autor** o un **administrador (rol 1)**; un tercero recibe `403`. Los tipos sin autor (`creado_por_id` nulo) son globales.
+
 ### `GET /api/catalogos/:catalogo`
-Lista todos los registros del catalogo.
+Lista todos los registros del catalogo. Para `tipos-evento` incluye `creado_por_nombre` (`Global` si no tiene autor).
 
 ### `POST /api/catalogos/:catalogo`
-Crea nuevo registro. Body: `{ columna1: valor, columna2: valor, ... }`
+Crea nuevo registro. Body: `{ columna1: valor, columna2: valor, ... }`. Para `tipos-evento`, el autor se toma de la sesión.
 
 ### `PUT /api/catalogos/:catalogo/:id`
-Actualiza registro. Body: `{ columna1: valor, ... }`
+Actualiza registro. Body: `{ columna1: valor, ... }`. Para `tipos-evento`, solo el autor o un administrador (`403` en caso contrario).
 
 ### `DELETE /api/catalogos/:catalogo/:id`
-Soft-delete (`activo = false`).
+Soft-delete (`activo = false`). Para `tipos-evento`, solo el autor o un administrador (`403` en caso contrario).
 
 ### `PUT /api/catalogos/:catalogo/:id/activar`
-Reactiva registro (`activo = true`).
+Reactiva registro (`activo = true`). Para `tipos-evento`, solo el autor o un administrador (`403` en caso contrario).
+
+> `/api/listados` devuelve unicamente los tipos de evento activos (`activo IS NOT FALSE`); los inactivos se ven en la gestion de este endpoint.
+
+---
+
+## `/api/cites` — Correspondencia oficial (CITES)
+
+Los endpoints requieren sesión. El correlativo es **anual y global de la firma** (`A&P N.º 001/2026`), compartido entre la creación desde un expediente y desde la sección de CITES. La `via` admite solo `correo` o `entrega física`. El archivo `.docx` se genera con la cabecera de la carta (el cuerpo lo redacta el usuario) y se guarda en `Documentos/{año}/CITES/`.
+
+### `POST /api/cites`
+Crea un CITE desde la sección (sin expediente). Genera el documento y consume el correlativo anual.
+
+| Body | Tipo | Requerido |
+|---|---|---|
+| `via` | string | Si (`correo` \| `entrega física`) |
+| `ref` | string | No |
+| `destinatario` | string | No |
+| `cargo_institucion` | string | No |
+
+Respuesta: `{ message, cite: {...}, numero: "A&P N.º 001/2026", documentoId }`
+
+Errores: `400` si la `via` es inválida.
+
+### `POST /api/cites/expediente/:id`
+Crea un CITE vinculado a un expediente. Si no se envía `destinatario`, se usa el **contacto principal** del cliente del caso.
+
+| Param | Tipo |
+|---|---|
+| `id` | string (expediente_id) |
+
+| Body | Tipo | Requerido |
+|---|---|---|
+| `via` | string | Si (`correo` \| `entrega física`) |
+| `ref` | string | No |
+| `destinatario` | string | No (por defecto, contacto principal del cliente) |
+| `cargo_institucion` | string | No |
+
+Respuesta: `{ message, cite: {...}, numero: "A&P N.º 002/2026", documentoId }`
+
+Errores: `403` si el usuario no tiene acceso al expediente. Registra la creación en el historial del caso.
+
+### `GET /api/cites`
+Lista los CITES creados por el usuario y los CITES de expedientes donde es miembro del equipo. No devuelve CITES ajenos.
+
+Respuesta:
+```json
+{
+  "cites": [
+    {
+      "id": 1,
+      "numero": 1,
+      "anio": 2026,
+      "via": "correo",
+      "ref": "Asunto",
+      "destinatario": "PABLO MIER GARRON",
+      "cargo_institucion": "GERENTE GENERAL",
+      "creado_por_id": 1,
+      "creado_por": "Blanca Sofia Alaiza",
+      "caso_id": 1,
+      "expediente_id": "LIT-2026-0001",
+      "documento_id": 27,
+      "creado_en": "28/09/2026 15:10",
+      "etiqueta": "A&P N.º 001/2026"
+    }
+  ]
+}
+```
 
 ---
 

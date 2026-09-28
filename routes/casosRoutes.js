@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const verifyToken = require("../middlewares/verifyToken");
+const autorizarCaso = require("../middlewares/autorizarCaso");
 const { registrarHistorial } = require("../utils/historialHelper");
 
 // Ruta para obtener la lista de casos (Activos o Historial)
@@ -161,10 +162,13 @@ router.post("/", verifyToken, async (req, res) => {
       [expedienteId, casoIdGenerado],
     );
 
-    await client.query (
-      `INSERT INTO equipo_caso (caso_id, usuario_id) VALUES ($1, $2)`,
-      [casoIdGenerado, usuarioId]
-    )
+    // El responsable y el creador quedan en el equipo automáticamente (sin duplicados)
+    await client.query(
+      `INSERT INTO equipo_caso (caso_id, usuario_id)
+       VALUES ($1, $2), ($1, $3)
+       ON CONFLICT (caso_id, usuario_id) DO NOTHING`,
+      [casoIdGenerado, responsable_id, usuarioId],
+    );
 
     // REGISTRAR EN EL HISTORIAL DE AUDITORÍA
     await registrarHistorial(
@@ -210,7 +214,7 @@ router.post("/", verifyToken, async (req, res) => {
 // ==========================================
 // RUTA DE EQUIPO LEGAL DEL CASO (GET /casos/equipo)
 // ==========================================
-router.get("/equipo", verifyToken, async (req, res) => {
+router.get("/equipo", verifyToken, autorizarCaso({ fuente: "query", clave: "expediente_id" }), async (req, res) => {
   try {
     const { expediente_id } = req.query;
     const equipoQuery = `
@@ -242,7 +246,7 @@ router.get("/equipo", verifyToken, async (req, res) => {
 // ==========================================
 // RUTA: Agregar miembros al equipo legal del caso (POST /casos/equipo)
 // ==========================================
-router.post("/equipo", verifyToken, async (req, res) => {
+router.post("/equipo", verifyToken, autorizarCaso({ fuente: "body", clave: "expediente_id" }), async (req, res) => {
   const client = await pool.connect();
 
   try {
@@ -302,7 +306,7 @@ router.post("/equipo", verifyToken, async (req, res) => {
 // ==========================================
 // RUTA: eliminar un miembro del equipo legal del caso (DELETE /casos/equipo)
 // ==========================================
-router.delete("/equipo", verifyToken, async (req, res) => {
+router.delete("/equipo", verifyToken, autorizarCaso({ fuente: "body", clave: "expediente_id" }), async (req, res) => {
   try {
     const { expediente_id, usuario_id } = req.body;
     const deleteQuery = `
@@ -324,7 +328,7 @@ router.delete("/equipo", verifyToken, async (req, res) => {
 // ==========================================
 // RUTA: OBTENER HISTORIAL DE UN CASO (GET)
 // ==========================================
-router.get("/:id/historial", verifyToken, async (req, res) => {
+router.get("/:id/historial", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const casoId = req.params.id;
 
@@ -407,7 +411,7 @@ router.get("/:id/historial", verifyToken, async (req, res) => {
 // RUTA: OBTENER HISTORIAL DE REVISIONES DE UN CASO (GET)
 // ==========================================
 // Ejemplo: GET /api/casos/EXP-2024-001/revisionActiva
-router.get("/:id/revisionActiva", verifyToken, async (req, res) => {
+router.get("/:id/revisionActiva", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const parametroId = req.params.id; // Puede ser el expediente_id (ej. EXP-2024-001
 
@@ -444,7 +448,7 @@ router.get("/:id/revisionActiva", verifyToken, async (req, res) => {
 // ==========================================
 // ENVIAR CASO / DOCUMENTOS A REVISIÓN (POST) SOLICITUD DE REVSION
 // ==========================================
-router.post("/:id/revisiones", verifyToken, async (req, res) => {
+router.post("/:id/revisiones", verifyToken, autorizarCaso(), async (req, res) => {
   // Para transacciones seguras, pedimos un "cliente" temporal a la base de datos
   const client = await pool.connect();
 
@@ -571,6 +575,7 @@ router.post("/:id/revisiones", verifyToken, async (req, res) => {
 router.patch(
   "/revisiones/:id_revision/cancelar",
   verifyToken,
+  autorizarCaso({ resolver: autorizarCaso.resolverPorRevision }),
   async (req, res) => {
     const client = await pool.connect();
 
@@ -663,7 +668,7 @@ router.patch(
 // RUTA: INICIAR REVISIÓN (MARCAR COMO "EN REVISIÓN") (PATCH)
 // ==========================================
 // Ejemplo: PATCH /api/casos/revisiones/5/iniciar
-router.patch("/revisiones/:id/iniciar", verifyToken, async (req, res) => {
+router.patch("/revisiones/:id/iniciar", verifyToken, autorizarCaso({ resolver: autorizarCaso.resolverPorRevision }), async (req, res) => {
   try {
     const revisionId = req.params.id;
     const revisorActual = req.user.userId;
@@ -736,7 +741,7 @@ router.patch("/revisiones/:id/iniciar", verifyToken, async (req, res) => {
 // RUTA: RESPONDER A UNA SOLICITUD DE REVISIÓN (PUT)
 // ==========================================
 // Ejemplo: PUT /api/casos/revisiones/5 (donde 5 es el ID de la revisión, no del caso)
-router.put("/revisiones/:id_revision", verifyToken, async (req, res) => {
+router.put("/revisiones/:id_revision", verifyToken, autorizarCaso({ resolver: autorizarCaso.resolverPorRevision }), async (req, res) => {
   const client = await pool.connect();
   console.log(
     `Usuario ${req.user.userId} intenta responder la revisión con ID ${req.params.id_revision}`,
@@ -852,7 +857,7 @@ router.put("/revisiones/:id_revision", verifyToken, async (req, res) => {
 // RUTA: FINALIZACIÓN / CERRAR UN CASO (PUT /casos/:id/cerrar)
 // ==========================================
 // Nota: Usamos req.params.id asumiendo que envías el expediente_id (Ej: EXP-2026-0001)
-router.put("/:id/cerrar", verifyToken, async (req, res) => {
+router.put("/:id/cerrar", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const expedienteId = req.params.id;
     const usuarioId = req.user.userId; // Extraemos quién lo está cerrando
@@ -903,7 +908,7 @@ router.put("/:id/cerrar", verifyToken, async (req, res) => {
 // ==========================================
 // RUTA: MODIFICACION DE UN CASO (PUT /casos/:id)
 // ==========================================
-router.put("/:id", verifyToken, async (req, res) => {
+router.put("/:id", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const casoId = req.params.id;
     const {
@@ -946,7 +951,7 @@ router.put("/:id", verifyToken, async (req, res) => {
 // RUTA: TRAER LOS DETALLES DE UN CASO (GET /casos/:id)
 // ==========================================
 
-router.get("/:id", verifyToken, async (req, res) => {
+router.get("/:id", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const casoId = req.params.id;
     // 1. Verificar si el usuario es el responsable del caso o es administrador
@@ -988,7 +993,7 @@ router.get("/:id", verifyToken, async (req, res) => {
 // RUTA: TRAER LOS DATOS PARA EL FORMULARIO DE EDICIÓN DE UN CASO (GET /casos/formData/:id)
 // ==========================================
 
-router.get("/formData/:id", verifyToken, async (req, res) => {
+router.get("/formData/:id", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const casoId = req.params.id;
 
@@ -1023,6 +1028,7 @@ router.get("/formData/:id", verifyToken, async (req, res) => {
 router.get(
   "/:expediente_id/contactos-asignados",
   verifyToken,
+  autorizarCaso({ clave: "expediente_id" }),
   async (req, res) => {
     const client = await pool.connect();
     try {
@@ -1052,6 +1058,7 @@ router.get(
 router.get(
   "/:expediente_id/contactos-disponibles",
   verifyToken,
+  autorizarCaso({ clave: "expediente_id" }),
   async (req, res) => {
     const client = await pool.connect();
     try {
@@ -1081,7 +1088,7 @@ router.get(
 );
 
 // POST /api/casos/:expediente_id/contactos
-router.post("/:expediente_id/contactos", verifyToken, async (req, res) => {
+router.post("/:expediente_id/contactos", verifyToken, autorizarCaso({ clave: "expediente_id" }), async (req, res) => {
   const client = await pool.connect();
   try {
     const { expediente_id } = req.params;
@@ -1146,6 +1153,7 @@ router.post("/:expediente_id/contactos", verifyToken, async (req, res) => {
 router.delete(
   "/:caso_id/contactos/:contacto_id",
   verifyToken,
+  autorizarCaso({ clave: "caso_id" }),
   async (req, res) => {
     try {
       const { caso_id, contacto_id } = req.params;

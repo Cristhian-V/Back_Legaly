@@ -43,9 +43,11 @@ router.get("/casosUsusario", verifyToken, async (req, res) => {
 
     // 3. Si NO es administrador (rol 1), agregamos las condiciones y el ID
     if (rolId !== 1) {
-      filtroCasos = "AND responsable_id = $1";
-      // Para eventos, filtramos por responsable o eventos sin caso asignado
-      filtroEventos = "AND (c.responsable_id = $1 OR e.caso_id IS NULL)";
+      filtroCasos =
+        "AND (responsable_id = $1 OR caso_id IN (SELECT caso_id FROM equipo_caso WHERE usuario_id = $1))";
+      // Para eventos, filtramos por responsable, miembros del equipo o eventos sin caso asignado
+      filtroEventos =
+        "AND (c.responsable_id = $1 OR c.caso_id IN (SELECT caso_id FROM equipo_caso WHERE usuario_id = $1) OR e.caso_id IS NULL)";
 
       // Agregamos el ID del usuario a los parámetros que se enviarán a Postgres
       parametrosCasos = [usuarioId];
@@ -112,8 +114,9 @@ router.get("/eventos", verifyToken, async (req, res) => {
     let filtroEventos = "";
     let parametrosEventos = [];
     if (rolId !== 1) {
-      // Si NO es admin, filtramos por responsable o eventos sin caso asignado
-      filtroEventos = "AND (c.responsable_id = $1 OR e.caso_id IS NULL)";
+      // Si NO es admin, filtramos por responsable, equipo del caso o eventos sin caso asignado
+      filtroEventos =
+        "AND (c.responsable_id = $1 OR c.caso_id IN (SELECT caso_id FROM equipo_caso WHERE usuario_id = $1) OR e.caso_id IS NULL)";
       parametrosEventos = [usuarioId];
     }
     // 3. Ejecutamos la consulta de Eventos (inyectando el filtro si existe)

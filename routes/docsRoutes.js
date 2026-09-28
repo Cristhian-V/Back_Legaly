@@ -4,6 +4,7 @@ const pool = require("../db");
 const multer = require("multer");
 const path = require("path");
 const verifyToken = require("../middlewares/verifyToken");
+const autorizarCaso = require("../middlewares/autorizarCaso");
 const fs = require("fs");
 const { registrarHistorial } = require("../utils/historialHelper");
 require("dotenv").config();
@@ -64,7 +65,7 @@ const upload = multer({ storage: storage, fileFilter: fileFilter });
 // ==========================================
 // RUTAS CREAR NUEVO DOCUMENTO
 // ==========================================
-router.post("/:id/crearDocumento", verifyToken, async (req, res) => {
+router.post("/:id/crearDocumento", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const expedienteId = req.params.id;
     const usuario_id = req.user.userId;
@@ -164,7 +165,7 @@ router.post("/:id/crearDocumento", verifyToken, async (req, res) => {
 // ==========================================
 // 1. OBTENER DOCUMENTACIÓN DE UN CASO (GET)
 // ==========================================
-router.get("/:id/documentacion", verifyToken, async (req, res) => {
+router.get("/:id/documentacion", verifyToken, autorizarCaso(), async (req, res) => {
   try {
     const casoId = req.params.id;
     const query = `
@@ -206,7 +207,7 @@ router.get("/:id/documentacion", verifyToken, async (req, res) => {
 // ==========================================
 // 2. AGREGAR DOCUMENTACIÓN A UN CASO (POST)
 // ==========================================
-router.post("/:id/documentacion", verifyToken, (req, res) => {
+router.post("/:id/documentacion", verifyToken, autorizarCaso(), (req, res) => {
   upload.single("archivo")(req, res, async function (err) {
     if (err) {
       if (err.message === "ARCHIVO_DUPLICADO") {
@@ -316,7 +317,7 @@ router.post("/:id/documentacion", verifyToken, (req, res) => {
 // ==========================================
 // 3. SUBIR NUEVA VERSIÓN DE DOCUMENTO (POST)
 // ==========================================
-router.post("/:id/nueva_version", verifyToken, (req, res) => {
+router.post("/:id/nueva_version", verifyToken, autorizarCaso({ resolver: autorizarCaso.resolverPorDocumento }), (req, res) => {
   upload.single("archivo")(req, res, async function (err) {
     if (!req.file) {
       return res
@@ -483,7 +484,7 @@ router.get("/descargar", (req, res) => {
 });
 
 // RUTA DELETE: Usamos /:id en la URL (Mejor práctica para DELETE)
-router.delete("/:id/eliminar", verifyToken, async (req, res) => {
+router.delete("/:id/eliminar", verifyToken, autorizarCaso({ resolver: autorizarCaso.resolverPorDocumento }), async (req, res) => {
   try {
     // 1. Extraemos el ID directamente desde la URL (params)
     const id = req.params.id;

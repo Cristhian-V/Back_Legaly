@@ -2,7 +2,10 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const verifyToken = require("../middlewares/verifyToken");
+const autorizarCaso = require("../middlewares/autorizarCaso");
 const { registrarHistorial } = require("../utils/historialHelper");
+
+const MODALIDADES_VALIDAS = ["virtual", "presencial"];
 
 // Obtener eventos del calendario global (casos + usuarios)
 router.get("/", verifyToken, async (req, res) => {
@@ -24,7 +27,7 @@ router.get("/", verifyToken, async (req, res) => {
       query = `
         SELECT 'caso' AS origen, c.expediente_id, eCal.id AS evento_id,
                eCal.titulo, eCal.descripcion, eCal.fecha_hora,
-               te.nombre AS tipo_evento, NULL AS creado_por
+               te.nombre AS tipo_evento, eCal.modalidad AS modalidad, NULL AS creado_por
         FROM casos c
         JOIN eventos_calendario eCal ON eCal.caso_id = c.caso_id
         JOIN tipos_evento_cal te ON te.id = eCal.tipo_evento_id
@@ -33,7 +36,7 @@ router.get("/", verifyToken, async (req, res) => {
 
         SELECT 'usuario' AS origen, NULL AS expediente_id, eu.id AS evento_id,
                eu.titulo, eu.descripcion, eu.fecha_hora,
-               te.nombre AS tipo_evento, u.nombre_completo AS creado_por
+               te.nombre AS tipo_evento, eu.modalidad AS modalidad, u.nombre_completo AS creado_por
         FROM eventos_usuarios eu
         JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
         JOIN usuarios u ON u.id = eu.creado_por_id
@@ -42,23 +45,23 @@ router.get("/", verifyToken, async (req, res) => {
       `;
       values = [];
     }
-    // Otros roles -> Eventos de casos (equipo + area_legal) + eventos de usuario propios
+    // Otros roles -> Eventos de casos donde son responsable o parte del equipo + eventos de usuario propios
     else {
       query = `
         SELECT 'caso' AS origen, c.expediente_id, eCal.id AS evento_id,
                eCal.titulo, eCal.descripcion, eCal.fecha_hora,
-               te.nombre AS tipo_evento, NULL AS creado_por
+               te.nombre AS tipo_evento, eCal.modalidad AS modalidad, NULL AS creado_por
         FROM casos c
         JOIN eventos_calendario eCal ON eCal.caso_id = c.caso_id
         JOIN tipos_evento_cal te ON te.id = eCal.tipo_evento_id
-        WHERE c.caso_id IN (SELECT caso_id FROM equipo_caso WHERE usuario_id = $1)
-           OR c.area_legal_id IN (SELECT area_legal_id FROM usuarios_area WHERE usuario_id = $1)
+        WHERE c.responsable_id = $1
+           OR c.caso_id IN (SELECT caso_id FROM equipo_caso WHERE usuario_id = $1)
 
         UNION ALL
 
         SELECT 'usuario' AS origen, NULL AS expediente_id, eu.id AS evento_id,
                eu.titulo, eu.descripcion, eu.fecha_hora,
-               te.nombre AS tipo_evento, u.nombre_completo AS creado_por
+               te.nombre AS tipo_evento, eu.modalidad AS modalidad, u.nombre_completo AS creado_por
         FROM eventos_usuarios eu
         JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
         JOIN usuarios u ON u.id = eu.creado_por_id
@@ -82,7 +85,7 @@ router.get("/", verifyToken, async (req, res) => {
 
 // ==========================================
 // Obtener eventos de un CASO ESPECÍFICO (GET)
-router.get("/caso/:caso_id", verifyToken, async (req, res) => {
+router.get("/caso/:caso_id", verifyToken, autorizarCaso({ clave: "caso_id" }), async (req, res) => {
   try {
     const casoId = req.params.caso_id;
 
@@ -93,6 +96,7 @@ SELECT c.expediente_id,
              eCal.titulo, 
              eCal.descripcion, 
              eCal.fecha_hora, 
+             eCal.modalidad,
              te.nombre AS tipo_evento
       FROM eventos_calendario eCal
       JOIN casos c ON c.caso_id = eCal.caso_id
@@ -114,20 +118,37 @@ SELECT c.expediente_id,
 });
 
 // Crear un nuevo evento en el calendario
-router.post("/", verifyToken, async (req, res) => {
+router.post("/", verifyToken, autorizarCaso({ fuente: "body", clave: "caso_id" }), async (req, res) => {
   try {
     const usuarioId = req.user.userId;
-    const { titulo, descripcion, fecha_hora, tipo_evento_id, caso_id } =
+    const { titulo, descripcion, fecha_hora, tipo_evento_id, caso_id, modalidad } =
       req.body;
 
+    if (!MODALIDADES_VALIDAS.includes(modalidad)) {
+      return res
+        .status(400)
+        .json({ error: "La modalidad debe ser 'virtual' o 'presencial'." });
+    }
+
     const crearEventoQuery = await pool.query(
-      `INSERT INTO eventos_calendario (titulo, descripcion, fecha_hora, tipo_evento_id, caso_id)
+      `INSERT INTO eventos_calendario (titulo, descripcion, fecha_hora, tipo_evento_id, caso_id, modalidad)
        VALUES ($1, $2, $3, $4,
-       (select caso_id from casos where expediente_id = $5)) RETURNING *`,
-      [titulo, descripcion, fecha_hora, tipo_evento_id, caso_id],
+       (select caso_id from casos where expediente_id = $5), $6) RETURNING *`,
+      [titulo, descripcion, fecha_hora, tipo_evento_id, caso_id, modalidad],
     );
 
     const casoId = crearEventoQuery.rows[0].caso_id;
+    const eventoId = crearEventoQuery.rows[0].id;
+
+    // Todo el equipo del caso queda como participante (pendiente de confirmar)
+    await pool.query(
+      `INSERT INTO participantes_evento (tipo_evento, evento_id, usuario_id)
+       SELECT 'caso', $1, e.usuario_id
+       FROM equipo_caso e
+       WHERE e.caso_id = $2
+       ON CONFLICT (tipo_evento, evento_id, usuario_id) DO NOTHING`,
+      [eventoId, casoId],
+    );
 
     // Registrar en el historial del caso
     await registrarHistorial(
@@ -151,21 +172,131 @@ router.post("/", verifyToken, async (req, res) => {
 });
 
 // ==========================================
+// OBTENER PARTICIPANTES DE UN EVENTO (GET /participantes)
+// ==========================================
+router.get("/participantes", verifyToken, async (req, res) => {
+  try {
+    const { tipo_evento, evento_id } = req.query;
+
+    if (!["caso", "usuario"].includes(tipo_evento) || !evento_id) {
+      return res.status(400).json({
+        error: "Debes indicar tipo_evento ('caso'|'usuario') y evento_id.",
+      });
+    }
+
+    // Para eventos de caso, validamos el acceso al expediente
+    if (tipo_evento === "caso") {
+      const casoId = await autorizarCaso.resolverPorEvento(evento_id);
+      if (!casoId) {
+        return res.status(404).json({ error: "El evento no existe." });
+      }
+      const permitido = await autorizarCaso.puedeAccederCaso(req.user.userId, casoId);
+      if (!permitido) {
+        return res.status(403).json({ error: "No tienes acceso a este expediente." });
+      }
+    }
+
+    const participantes = await pool.query(
+      `SELECT p.usuario_id, p.estado_asistencia, p.comentario, p.respondido_en,
+              u.nombre_completo, u.avatar_url
+       FROM participantes_evento p
+       JOIN usuarios u ON u.id = p.usuario_id
+       WHERE p.tipo_evento = $1 AND p.evento_id = $2
+       ORDER BY u.nombre_completo ASC`,
+      [tipo_evento, evento_id],
+    );
+
+    res.json({ participantes: participantes.rows });
+  } catch (error) {
+    console.error("Error al obtener participantes del evento:", error);
+    res.status(500).json({ error: "Error interno al obtener los participantes." });
+  }
+});
+
+// ==========================================
+// REGISTRAR ASISTENCIA DE UN PARTICIPANTE (PUT /asistencia)
+// ==========================================
+router.put("/asistencia", verifyToken, async (req, res) => {
+  try {
+    const usuarioId = req.user.userId;
+    const { tipo_evento, evento_id, estado_asistencia, comentario } = req.body;
+
+    if (!["caso", "usuario"].includes(tipo_evento)) {
+      return res
+        .status(400)
+        .json({ error: "tipo_evento debe ser 'caso' o 'usuario'." });
+    }
+    if (!evento_id) {
+      return res.status(400).json({ error: "Falta evento_id." });
+    }
+    if (!["confirmado", "no_asiste"].includes(estado_asistencia)) {
+      return res.status(400).json({
+        error: "estado_asistencia debe ser 'confirmado' o 'no_asiste'.",
+      });
+    }
+    if (estado_asistencia === "no_asiste" && (!comentario || !String(comentario).trim())) {
+      return res.status(400).json({
+        error: "Debes indicar un comentario cuando no asistirás.",
+      });
+    }
+
+    // Solo se actualiza el propio registro (WHERE usuario_id = usuario autenticado)
+    const update = await pool.query(
+      `UPDATE participantes_evento
+       SET estado_asistencia = $1,
+           comentario = $2,
+           respondido_en = CURRENT_TIMESTAMP
+       WHERE tipo_evento = $3 AND evento_id = $4 AND usuario_id = $5
+       RETURNING usuario_id, estado_asistencia, comentario, respondido_en`,
+      [
+        estado_asistencia,
+        estado_asistencia === "no_asiste" ? comentario : null,
+        tipo_evento,
+        evento_id,
+        usuarioId,
+      ],
+    );
+
+    if (update.rows.length === 0) {
+      return res
+        .status(403)
+        .json({ error: "No eres participante de este evento." });
+    }
+
+    res.json({
+      message: "Asistencia registrada.",
+      participante: update.rows[0],
+    });
+  } catch (error) {
+    console.error("Error al registrar asistencia:", error);
+    res
+      .status(500)
+      .json({ error: "Error interno al registrar la asistencia." });
+  }
+});
+
+// ==========================================
 // Modificar un evento existente (PUT)
-router.put("/:id", verifyToken, async (req, res) => {
+router.put("/:id", verifyToken, autorizarCaso({ resolver: autorizarCaso.resolverPorEvento }), async (req, res) => {
   try {
     const eventoId = req.params.id;
     const usuarioId = req.user.userId;
-    const { titulo, descripcion, fecha_hora, tipo_evento_id } = req.body;
+    const { titulo, descripcion, fecha_hora, tipo_evento_id, modalidad } = req.body;
+
+    if (modalidad !== undefined && !MODALIDADES_VALIDAS.includes(modalidad)) {
+      return res
+        .status(400)
+        .json({ error: "La modalidad debe ser 'virtual' o 'presencial'." });
+    }
 
     // Actualizamos el evento y pedimos que nos retorne los datos actualizados
     // Nota: Normalmente el caso_id no se cambia, por lo que no lo actualizamos
     const updateQuery = await pool.query(
       `UPDATE eventos_calendario 
-       SET titulo = $1, descripcion = $2, fecha_hora = $3, tipo_evento_id = $4
-       WHERE id = $5 
+       SET titulo = $1, descripcion = $2, fecha_hora = $3, tipo_evento_id = $4, modalidad = COALESCE($5, modalidad)
+       WHERE id = $6 
        RETURNING *`,
-      [titulo, descripcion, fecha_hora, tipo_evento_id, eventoId],
+      [titulo, descripcion, fecha_hora, tipo_evento_id, modalidad ?? null, eventoId],
     );
 
     if (updateQuery.rows.length === 0) {
@@ -197,10 +328,16 @@ router.put("/:id", verifyToken, async (req, res) => {
 
 // ==========================================
 // Eliminar un evento del calendario (DELETE)
-router.delete("/:id", verifyToken, async (req, res) => {
+router.delete("/:id", verifyToken, autorizarCaso({ resolver: autorizarCaso.resolverPorEvento }), async (req, res) => {
   try {
     const eventoId = req.params.id;
     const usuarioId = req.user.userId;
+
+    // Eliminamos los participantes asociados (no hay FK por ser polimórfico)
+    await pool.query(
+      "DELETE FROM participantes_evento WHERE tipo_evento = 'caso' AND evento_id = $1",
+      [eventoId],
+    );
 
     // Eliminamos el evento físicamente y retornamos el caso_id y titulo para el historial
     const deleteQuery = await pool.query(
@@ -250,8 +387,8 @@ router.get("/usuario", verifyToken, async (req, res) => {
     if (rolIdValue === 1) {
       query = `
         SELECT eu.id AS evento_id, eu.titulo, eu.descripcion, eu.fecha_hora,
-               te.nombre AS tipo_evento, u.nombre_completo AS creado_por,
-               eu.creado_por_id
+               te.nombre AS tipo_evento, eu.modalidad AS modalidad,
+               u.nombre_completo AS creado_por, eu.creado_por_id
         FROM eventos_usuarios eu
         JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
         JOIN usuarios u ON u.id = eu.creado_por_id
@@ -261,8 +398,8 @@ router.get("/usuario", verifyToken, async (req, res) => {
     } else {
       query = `
         SELECT eu.id AS evento_id, eu.titulo, eu.descripcion, eu.fecha_hora,
-               te.nombre AS tipo_evento, u.nombre_completo AS creado_por,
-               eu.creado_por_id
+               te.nombre AS tipo_evento, eu.modalidad AS modalidad,
+               u.nombre_completo AS creado_por, eu.creado_por_id
         FROM eventos_usuarios eu
         JOIN tipos_evento_cal te ON te.id = eu.tipo_evento_id
         JOIN usuarios u ON u.id = eu.creado_por_id
@@ -289,25 +426,31 @@ router.post("/usuario", verifyToken, async (req, res) => {
 
   try {
     const usuarioId = req.user.userId;
-    const { titulo, descripcion, fecha_hora, tipo_evento_id, participantes_ids } = req.body;
+    const { titulo, descripcion, fecha_hora, tipo_evento_id, participantes_ids, modalidad } = req.body;
 
     if (!titulo || !fecha_hora || !tipo_evento_id) {
       return res.status(400).json({ error: "titulo, fecha_hora y tipo_evento_id son obligatorios." });
     }
 
+    if (!MODALIDADES_VALIDAS.includes(modalidad)) {
+      return res.status(400).json({ error: "La modalidad debe ser 'virtual' o 'presencial'." });
+    }
+
     await client.query("BEGIN");
 
     const nuevoEvento = await client.query(
-      `INSERT INTO eventos_usuarios (titulo, descripcion, fecha_hora, tipo_evento_id, creado_por_id)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [titulo, descripcion || null, fecha_hora, tipo_evento_id, usuarioId],
+      `INSERT INTO eventos_usuarios (titulo, descripcion, fecha_hora, tipo_evento_id, creado_por_id, modalidad)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [titulo, descripcion || null, fecha_hora, tipo_evento_id, usuarioId, modalidad],
     );
 
     const eventoId = nuevoEvento.rows[0].id;
 
     // Insertar al creador como participante
     await client.query(
-      `INSERT INTO participantes_evento (evento_id, usuario_id) VALUES ($1, $2)`,
+      `INSERT INTO participantes_evento (tipo_evento, evento_id, usuario_id)
+       VALUES ('usuario', $1, $2)
+       ON CONFLICT (tipo_evento, evento_id, usuario_id) DO NOTHING`,
       [eventoId, usuarioId],
     );
 
@@ -315,9 +458,9 @@ router.post("/usuario", verifyToken, async (req, res) => {
     if (participantes_ids && Array.isArray(participantes_ids) && participantes_ids.length > 0) {
       for (const participanteId of participantes_ids) {
         await client.query(
-          `INSERT INTO participantes_evento (evento_id, usuario_id) 
-           VALUES ($1, $2) 
-           ON CONFLICT (evento_id, usuario_id) DO NOTHING`,
+          `INSERT INTO participantes_evento (tipo_evento, evento_id, usuario_id)
+           VALUES ('usuario', $1, $2)
+           ON CONFLICT (tipo_evento, evento_id, usuario_id) DO NOTHING`,
           [eventoId, participanteId],
         );
       }
@@ -367,7 +510,7 @@ router.delete("/usuario/:id", verifyToken, async (req, res) => {
     await client.query("BEGIN");
 
     await client.query(
-      `DELETE FROM participantes_evento WHERE evento_id = $1`,
+      `DELETE FROM participantes_evento WHERE tipo_evento = 'usuario' AND evento_id = $1`,
       [eventoId],
     );
 

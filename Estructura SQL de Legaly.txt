@@ -26,7 +26,7 @@ roles_usuario: Permisos y roles en el sistema (id, nombre, activo).
 tipo_documento: Clasificación de los documentos subidos (id, nombre).  
 
 
-tipos_evento_cal: Tipos de eventos en el calendario (Audiencia, reunión, etc.) (id, nombre, activo).  
+tipos_evento_cal: Tipos de eventos en el calendario (Audiencia, reunión, etc.) (id, nombre, activo, color, creado_por_id). creado_por_id registra al usuario que creó el tipo; NULL significa un tipo global (disponible para todos).  
 
 
 tipos_historial_caso: Códigos de hitos que ocurren en un caso (id, codigo, nombre).  
@@ -95,13 +95,13 @@ revisiones_caso: Solicitudes formales de revisión y feedback para elementos de 
 Control de tiempos, reuniones y plazos legales.
 
 
-eventos_calendario: Hitos y tareas vinculadas estrictamente a un caso. (id, caso_id, titulo, fecha_hora, tipo_evento_id)  
+eventos_calendario: Hitos y tareas vinculadas estrictamente a un caso. (id, caso_id, titulo, fecha_hora, tipo_evento_id, modalidad)  
 
 
-eventos_usuarios: Eventos personales o del equipo, no necesariamente atados a un caso. (id, titulo, fecha_hora, tipo_evento_id, creado_por_id)  
+eventos_usuarios: Eventos personales o del equipo, no necesariamente atados a un caso. (id, titulo, fecha_hora, tipo_evento_id, creado_por_id, modalidad)  
 
 
-participantes_evento: Pivote de asistentes a eventos. (evento_id, usuario_id)  
+participantes_evento: Pivote de asistentes a eventos, con tipo (caso/usuario), estado de asistencia y comentario. (tipo_evento, evento_id, usuario_id, estado_asistencia, comentario, respondido_en)  
 
 
 historial_caso: Registro de auditoría (logs) de todas las acciones que ocurren dentro de un expediente legal. (id, caso_id, tipo_historial_id, usuario_id, titulo, descripcion)  
@@ -112,3 +112,15 @@ interacciones_ia: Registra el historial de chat o prompts generados entre un usu
 
 
 usuarios_area: Tabla pivote para establecer a qué Área Legal (Ej. Litigios, Propiedad Intelectual) pertenece cada usuario/abogado. (id, usuario_id, area_legal_id)
+
+
+7. 📨 Dominio de Correspondencia (CITES)
+Gestiona la correspondencia oficial numerada de la firma.
+
+cites: Registro de CITES con correlativo anual global de la firma. (id, numero, anio, via, ref, destinatario, cargo_institucion, creado_por_id, caso_id, documento_id, creado_en).
+Columnas Clave: UNIQUE (anio, numero); via admite únicamente 'correo' o 'entrega física'; creado_por_id, caso_id y documento_id son anulables (un CITE sin expediente tiene caso_id nulo).
+
+cites_correlativos: Contador anual del correlativo de CITES. (anio PK, ultimo). Se incrementa de forma atómica por año (ON CONFLICT DO UPDATE).
+
+
+Nota: para actualizar una base de datos existente (por ejemplo, en el servidor de producción) se usa el script idempotente `actualizacion_bd_cites_y_tipos_evento.sql` (raíz del proyecto). Ejecutarlo ANTES de desplegar el código nuevo.

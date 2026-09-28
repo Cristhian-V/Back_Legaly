@@ -24,12 +24,56 @@ const verificarCatalogo = (req, res, next) => {
 };
 
 // ==========================================
+// PERMISOS ESPECÍFICOS DE TIPOS DE EVENTO
+// ==========================================
+const esAdministrador = async (usuarioId) => {
+    const resultado = await pool.query('SELECT rol_id FROM usuarios WHERE id = $1', [usuarioId]);
+    return resultado.rows.length > 0 && resultado.rows[0].rol_id === 1;
+};
+
+// El autor de un tipo de evento siempre es el usuario de la sesión.
+const asignarAutorTipoEvento = (req, res, next) => {
+    if (req.params.catalogo === 'tipos-evento') {
+        req.body = { ...req.body, creado_por_id: req.user.userId };
+    }
+    next();
+};
+
+// Solo el autor del tipo de evento o un administrador (rol 1) pueden modificarlo.
+const verificarPermisoTipoEvento = async (req, res, next) => {
+    if (req.params.catalogo !== 'tipos-evento') return next();
+    try {
+        const { id } = req.params;
+        const fila = await pool.query('SELECT creado_por_id FROM tipos_evento_cal WHERE id = $1', [id]);
+
+        if (fila.rows.length === 0) return next();
+
+        const autor = fila.rows[0].creado_por_id;
+        if (autor !== null && autor === req.user.userId) return next();
+        if (await esAdministrador(req.user.userId)) return next();
+
+        return res.status(403).json({ error: 'Solo el autor del tipo de evento o un administrador puede modificarlo.' });
+    } catch (error) {
+        console.error('Error al verificar el permiso del tipo de evento:', error);
+        return res.status(500).json({ error: 'Error interno al verificar el permiso.' });
+    }
+};
+
+// ==========================================
 // 1. OBTENER TODOS LOS REGISTROS (GET)
 // ==========================================
 router.get('/:catalogo', verifyToken, verificarCatalogo, async (req, res) => {
     try {
         // Traemos todos para que el panel de admin pueda ver incluso los inactivos
-        const query = `SELECT * FROM ${req.nombreTabla} ORDER BY id ASC`;
+        let query = `SELECT * FROM ${req.nombreTabla} ORDER BY id ASC`;
+        if (req.params.catalogo === 'tipos-evento') {
+            query = `
+                SELECT t.*, u.nombre_completo AS creado_por_nombre
+                FROM tipos_evento_cal t
+                LEFT JOIN usuarios u ON u.id = t.creado_por_id
+                ORDER BY t.id ASC
+            `;
+        }
         const resultado = await pool.query(query);
         res.json(resultado.rows);
     } catch (error) {
@@ -41,7 +85,7 @@ router.get('/:catalogo', verifyToken, verificarCatalogo, async (req, res) => {
 // ==========================================
 // 2. CREAR UN NUEVO REGISTRO (POST)
 // ==========================================
-router.post('/:catalogo', verifyToken, verificarCatalogo, async (req, res) => {
+router.post('/:catalogo', verifyToken, verificarCatalogo, asignarAutorTipoEvento, async (req, res) => {
     try {
         const data = req.body;
         const columnas = Object.keys(data);
@@ -68,7 +112,7 @@ router.post('/:catalogo', verifyToken, verificarCatalogo, async (req, res) => {
 // ==========================================
 // 3. ACTUALIZAR UN REGISTRO (PUT)
 // ==========================================
-router.put('/:catalogo/:id', verifyToken, verificarCatalogo, async (req, res) => {
+router.put('/:catalogo/:id', verifyToken, verificarCatalogo, verificarPermisoTipoEvento, async (req, res) => {
     try {
         const { id } = req.params;
         const data = req.body;
@@ -102,7 +146,7 @@ router.put('/:catalogo/:id', verifyToken, verificarCatalogo, async (req, res) =>
 // ==========================================
 // 4. ELIMINACIÓN LÓGICA (DELETE)
 // ==========================================
-router.delete('/:catalogo/:id', verifyToken, verificarCatalogo, async (req, res) => {
+router.delete('/:catalogo/:id', verifyToken, verificarCatalogo, verificarPermisoTipoEvento, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -127,7 +171,7 @@ router.delete('/:catalogo/:id', verifyToken, verificarCatalogo, async (req, res)
 // ==========================================
 // 5. HABILITACION LÓGICA
 // ==========================================
-router.put('/:catalogo/:id/activar', verifyToken, verificarCatalogo, async (req, res) => {
+router.put('/:catalogo/:id/activar', verifyToken, verificarCatalogo, verificarPermisoTipoEvento, async (req, res) => {
     try {
         const { id } = req.params;
 
