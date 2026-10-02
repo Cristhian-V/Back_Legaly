@@ -124,3 +124,9 @@ cites_correlativos: Contador anual del correlativo de CITES. (anio PK, ultimo). 
 
 
 Nota: para actualizar una base de datos existente (por ejemplo, en el servidor de producción) se usa el script idempotente `actualizacion_bd_cites_y_tipos_evento.sql` (raíz del proyecto). Ejecutarlo ANTES de desplegar el código nuevo.
+
+8. 🔁 Control de Migraciones
+Registra las migraciones de base de datos ya aplicadas.
+
+schema_migrations: Control de versiones de las migraciones. (version text PK, aplicado_en timestamptz NOT NULL DEFAULT now()).
+La versión es el nombre del archivo de migración (ej. `0001_cites_correlativo.sql`). Las migraciones viven en `infra/migraciones/` y las aplica `infra/deploy.sh` (solo las pendientes).
